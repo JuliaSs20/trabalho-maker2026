@@ -118,17 +118,29 @@ class LeanstarAngleConverter {
 
 class LeanstarBLEManager {
   constructor(onDataCallback, onStatusCallback) {
-    this.SERVICE_UUID        = "0000ffe0-0000-1000-8000-00805f9b34fb";
-    this.CHARACTERISTIC_UUID = "0000ffe1-0000-1000-8000-00805f9b34fb";
+    this.BLE_PROFILES = [
+      {
+        serviceUuid: "0000ffe0-0000-1000-8000-00805f9b34fb",
+        characteristicUuid: "0000ffe1-0000-1000-8000-00805f9b34fb",
+        format: "text"
+      },
+      {
+        serviceUuid: "19b10000-e8f2-537e-4f6c-d104768a1214",
+        characteristicUuid: "19b10001-e8f2-537e-4f6c-d104768a1214",
+        format: "leanstar-packet"
+      }
+    ];
 
     this.device = null;
     this.server = null;
     this.characteristic = null;
+    this.activeProfile = null;
     this.isConnected = false;
 
     this.onDataCallback = onDataCallback || (() => {});
     this.onStatusCallback = onStatusCallback || (() => {});
     this.decoder = new TextDecoder('utf-8');
+    this.angleConverter = new LeanstarAngleConverter();
   }
 
   /**
@@ -151,7 +163,7 @@ class LeanstarBLEManager {
       // HM-06 BLE UART modules commonly expose FFE0/FFE1.
       this.device = await navigator.bluetooth.requestDevice({
         acceptAllDevices: true,
-        optionalServices: [this.SERVICE_UUID]
+        optionalServices: this.BLE_PROFILES.map((profile) => profile.serviceUuid)
       });
 
       this.device.addEventListener('gattserverdisconnected', () => this.handleDisconnection());
@@ -159,8 +171,20 @@ class LeanstarBLEManager {
       console.log(`[WEB BLE] Conectando ao GATT Server de ${this.device.name || "sensor selecionado"}...`);
       this.server = await this.device.gatt.connect();
 
-      const service = await this.server.getPrimaryService(this.SERVICE_UUID);
-      this.characteristic = await service.getCharacteristic(this.CHARACTERISTIC_UUID);
+      for (const profile of this.BLE_PROFILES) {
+        try {
+          const service = await this.server.getPrimaryService(profile.serviceUuid);
+          this.characteristic = await service.getCharacteristic(profile.characteristicUuid);
+          this.activeProfile = profile;
+          break;
+        } catch (error) {
+          if (!error || error.name !== "NotFoundError") throw error;
+        }
+      }
+
+      if (!this.characteristic) {
+        throw new Error("O dispositivo conectou, mas não oferece um serviço de ângulo compatível (HM-06 FFE0/FFE1 ou BioPhysio Leanstar).");
+      }
 
       this.characteristic.addEventListener(
         'characteristicvaluechanged',
@@ -184,6 +208,26 @@ class LeanstarBLEManager {
 
   handleCharacteristicNotification(event) {
     const dataView = event.target.value;
+    if (this.activeProfile && this.activeProfile.format === "leanstar-packet" && dataView.byteLength >= 12) {
+      const rawAdc = dataView.getUint16(0, true);
+      const voltage = dataView.getFloat32(4, true);
+      const resistanceOhms = dataView.getFloat32(8, true);
+      if (Number.isFinite(voltage) && voltage >= 0 && voltage <= 3.3) {
+        const angleDeg = this.angleConverter.voltageToAngle(voltage);
+        this.onDataCallback({
+          timestamp: Date.now(),
+          angleDeg,
+          rawValue: `${voltage.toFixed(3)} V`,
+          rawAdc,
+          voltage,
+          resistanceOhms
+        });
+        return;
+      }
+      console.warn("[BLE STREAM] Pacote Leanstar inválido; tensão fora do intervalo esperado.");
+      return;
+    }
+
     const text = this.decoder.decode(dataView).trim().replace(',', '.');
     const match = text.match(/[-+]?(?:\d+\.?\d*|\.\d+)/);
     const angleDeg = match ? Number(match[0]) : NaN;
@@ -203,6 +247,7 @@ class LeanstarBLEManager {
   handleDisconnection() {
     this.isConnected = false;
     this.characteristic = null;
+    this.activeProfile = null;
     this.server = null;
     this.onStatusCallback(false, this.device ? this.device.name || "HM-06" : "HM-06");
     console.warn("[WEB BLE] Sensor Bluetooth desconectado.");
