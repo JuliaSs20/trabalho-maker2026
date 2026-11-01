@@ -162,11 +162,11 @@ class LeanstarBLEManager {
       const service = await this.server.getPrimaryService(this.SERVICE_UUID);
       this.characteristic = await service.getCharacteristic(this.CHARACTERISTIC_UUID);
 
-      await this.characteristic.startNotifications();
       this.characteristic.addEventListener(
         'characteristicvaluechanged',
         (event) => this.handleCharacteristicNotification(event)
       );
+      await this.characteristic.startNotifications();
 
       this.isConnected = true;
       this.onStatusCallback(true, this.device.name || "HM-06");
@@ -184,7 +184,7 @@ class LeanstarBLEManager {
 
   handleCharacteristicNotification(event) {
     const dataView = event.target.value;
-    const text = this.decoder.decode(dataView).trim();
+    const text = this.decoder.decode(dataView).trim().replace(',', '.');
     const match = text.match(/[-+]?(?:\d+\.?\d*|\.\d+)/);
     const angleDeg = match ? Number(match[0]) : NaN;
 

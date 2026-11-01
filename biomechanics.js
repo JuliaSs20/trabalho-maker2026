@@ -797,7 +797,13 @@ class TherapeuticExerciseAnalyzer {
       biceps_curl: { start: 140, target: 50, startDirection: "above", targetDirection: "below", targetRange: "35° a 50°" },
       triceps_extension: { start: 95, target: 165, startDirection: "below", targetDirection: "above", targetRange: "165° a 180°" }
     };
+    const exerciseConfig = ExerciseLibrary[this.currentExerciseKey] || ExerciseLibrary.squat;
     const protocol = protocols[this.currentExerciseKey] || protocols.squat;
+    const rangeBounds = exerciseConfig.targetRange.match(/([\d.]+)°\s*a\s*([\d.]+)°/);
+    const targetMin = rangeBounds ? Number(rangeBounds[1]) : 80;
+    const targetMax = rangeBounds ? Number(rangeBounds[2]) : 90;
+    protocol.target = protocol.targetDirection === "above" ? targetMin : targetMax;
+    protocol.targetRange = exerciseConfig.targetRange;
     const isAtThreshold = (value, threshold, direction) =>
       direction === "above" ? value >= threshold : value <= threshold;
     const isAtStart = isAtThreshold(angleDeg, protocol.start, protocol.startDirection);
@@ -819,14 +825,7 @@ class TherapeuticExerciseAnalyzer {
       this.correctReps++;
     }
 
-    const exerciseConfig = ExerciseLibrary[this.currentExerciseKey] || ExerciseLibrary.squat;
-    const inTargetRange = this.currentExerciseKey === "squat"
-      ? angleDeg >= 78 && angleDeg <= 92
-      : this.currentExerciseKey === "shoulder_abduction"
-        ? angleDeg >= 85 && angleDeg <= 95
-        : this.currentExerciseKey === "biceps_curl"
-          ? angleDeg >= 35 && angleDeg <= 50
-          : angleDeg >= 165 && angleDeg <= 180;
+    const inTargetRange = angleDeg >= targetMin && angleDeg <= targetMax;
     const feedback = repCompleted
       ? "Repetição registrada por amplitude. O sensor não avalia alinhamento ou postura."
       : inTargetRange

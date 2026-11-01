@@ -75,6 +75,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentJSONProtocol = "";
   let sessionLogs = [];
   let sessionUsedBleSensor = false;
+  let hasReceivedBleReading = false;
 
   // Estado do Motor MediaPipe Pose & Conexão de Mídia
   let poseEngine = null;
@@ -767,6 +768,8 @@ document.addEventListener('DOMContentLoaded', () => {
   function updatePatientUI(data) {
     if (!data || !data.angulosAtuais) return;
     const isSensorEvaluation = Boolean(data.sensorTelemetry);
+    // Do not let a camera frame already in progress overwrite live BLE telemetry.
+    if (bleSensor && bleSensor.isConnected && !isSensorEvaluation) return;
 
     hudPhaseText.textContent = data.faseMovimento ? data.faseMovimento.toUpperCase() : "NEUTRO";
     hudKneeAngle.textContent = `${data.angulosAtuais.principalDeg.toFixed(0)}°`;
@@ -831,12 +834,23 @@ document.addEventListener('DOMContentLoaded', () => {
   const bleSensor = new window.LeanstarBLEManager(
     (reading) => {
       sessionUsedBleSensor = true;
+      if (!hasReceivedBleReading) {
+        hasReceivedBleReading = true;
+        updateStatusText(`Sensor BLE recebendo ângulo: ${reading.angleDeg.toFixed(1)}°`, "green");
+      }
       const data = analyzer.processSensorAngle(reading.angleDeg);
       data.sensorTelemetry = reading;
       updatePatientUI(data);
     },
     (connected, deviceName) => {
-      if (connected) sessionUsedBleSensor = true;
+      if (connected) {
+        sessionUsedBleSensor = true;
+        hasReceivedBleReading = false;
+        patientFeedbackCard.className = "patient-feedback-card status-warning";
+        feedbackTag.textContent = "AGUARDANDO LEITURA DO SENSOR";
+        feedbackMainMsg.textContent = "Sensor conectado. Aguardando o primeiro ângulo do Arduino.";
+        valKneeAngle.textContent = "--°";
+      }
       if (btnConnectSensor) {
         btnConnectSensor.classList.toggle('btn-outline', !connected);
         btnConnectSensor.classList.toggle('btn-primary', connected);
@@ -847,7 +861,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window.lucide) lucide.createIcons();
       }
       updateStatusText(
-        connected ? `Sensor BLE conectado: ${deviceName}` : "Sensor BLE desconectado",
+        connected ? `Sensor BLE conectado; aguardando dados: ${deviceName}` : "Sensor BLE desconectado",
         connected ? "green" : "amber"
       );
     }
