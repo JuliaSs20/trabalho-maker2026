@@ -44,8 +44,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const patientFeedbackCard = document.getElementById('patient-feedback-card');
   const feedbackTag = document.getElementById('feedback-tag');
   const feedbackMainMsg = document.getElementById('feedback-main-msg');
+  const feedbackIconContainer = document.getElementById('feedback-icon-container');
 
   const valKneeAngle = document.getElementById('val-knee-angle');
+  const targetKneeAngle = document.getElementById('target-knee-angle');
   const barKneeFlexion = document.getElementById('bar-knee-flexion');
   const valTrunkAngle = document.getElementById('val-trunk-angle');
   const barTrunkAngle = document.getElementById('bar-trunk-angle');
@@ -779,21 +781,32 @@ document.addEventListener('DOMContentLoaded', () => {
     const status = data.qualidadeExecucao.status;
     const msg = data.qualidadeExecucao.mensagemFeedback;
 
+    const needsCorrection = status !== 'EXCELENTE';
     patientFeedbackCard.className = `patient-feedback-card status-${status === 'EXCELENTE' ? 'good' : (status === 'ATENÇÃO' ? 'warning' : 'danger')}`;
-    feedbackTag.textContent = isSensorEvaluation
-      ? 'AVALIAÇÃO DE AMPLITUDE'
-      : status === 'EXCELENTE' ? 'EXCELENTE POSTURA' : (status === 'ATENÇÃO' ? 'ATENÇÃO À POSTURA' : 'CORREÇÃO NECESSÁRIA');
-    feedbackMainMsg.textContent = msg;
+    feedbackTag.textContent = needsCorrection ? 'CORREÇÃO NECESSÁRIA' : (isSensorEvaluation ? 'AVALIAÇÃO DE AMPLITUDE' : 'EXCELENTE POSTURA');
+    feedbackMainMsg.textContent = isSensorEvaluation && needsCorrection
+      ? `Ajuste o movimento. Ângulo atual: ${data.angulosAtuais.principalDeg.toFixed(1)}°. Alvo: ${data.targetRange}.`
+      : msg;
+    if (feedbackIconContainer) {
+      feedbackIconContainer.innerHTML = `<i data-lucide="${needsCorrection ? 'alert-triangle' : 'check-circle-2'}"></i>`;
+      if (window.lucide) lucide.createIcons({ root: feedbackIconContainer });
+    }
 
-    if (status !== 'EXCELENTE' && !isSensorEvaluation) {
+    if (needsCorrection && !isSensorEvaluation) {
       speakFeedback(msg);
       canvasWarningToast.classList.remove('hidden');
       canvasWarningMsg.textContent = msg;
+    } else if (needsCorrection && isSensorEvaluation) {
+      canvasWarningToast.classList.add('hidden');
+      speakFeedback(feedbackMainMsg.textContent);
     } else {
       canvasWarningToast.classList.add('hidden');
     }
 
     valKneeAngle.textContent = `${data.angulosAtuais.principalDeg.toFixed(1)}°`;
+    if (targetKneeAngle && data.targetRange) {
+      targetKneeAngle.textContent = `Alvo: ${data.targetRange}`;
+    }
     const mainPct = Math.min(100, Math.max(0, (data.angulosAtuais.principalDeg / 180) * 100));
     barKneeFlexion.style.width = `${mainPct}%`;
 
