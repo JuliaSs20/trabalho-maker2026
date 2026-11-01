@@ -136,6 +136,9 @@ class LeanstarBLEManager {
     this.characteristic = null;
     this.activeProfile = null;
     this.isConnected = false;
+    this.readTimer = null;
+    this.isReading = false;
+    this.lastNotificationAt = 0;
 
     this.onDataCallback = onDataCallback || (() => {});
     this.onStatusCallback = onStatusCallback || (() => {});
@@ -186,19 +189,33 @@ class LeanstarBLEManager {
         throw new Error("O dispositivo conectou, mas não oferece um serviço de ângulo compatível (HM-06 FFE0/FFE1 ou BioPhysio Leanstar).");
       }
 
-      this.characteristic.addEventListener(
-        'characteristicvaluechanged',
-        (event) => this.handleCharacteristicNotification(event)
-      );
-      await this.characteristic.startNotifications();
+      const supportsNotifications = this.characteristic.properties.notify || this.characteristic.properties.indicate;
+      if (supportsNotifications) {
+        this.characteristic.addEventListener(
+          'characteristicvaluechanged',
+          (event) => this.handleCharacteristicNotification(event)
+        );
+        await this.characteristic.startNotifications();
+      } else if (!this.characteristic.properties.read) {
+        throw new Error("A característica Bluetooth não permite notificações nem leitura do ângulo.");
+      }
 
       this.isConnected = true;
       this.onStatusCallback(true, this.device.name || "HM-06");
+      if (this.characteristic.properties.read) {
+        this.readCurrentValue();
+        this.readTimer = window.setInterval(() => {
+          const notificationsStalled = Date.now() - this.lastNotificationAt > 1000;
+          if (!supportsNotifications || notificationsStalled) this.readCurrentValue();
+        }, 200);
+      }
       console.log("[WEB BLE] Pareado com sucesso! Recebendo ângulos do sensor...");
       return true;
     } catch (error) {
       console.error("[WEB BLE] Erro ao conectar:", error);
       this.isConnected = false;
+      if (this.readTimer !== null) window.clearInterval(this.readTimer);
+      this.readTimer = null;
       if (this.device && this.device.gatt && this.device.gatt.connected) {
         this.device.gatt.disconnect();
       }
@@ -207,7 +224,24 @@ class LeanstarBLEManager {
   }
 
   handleCharacteristicNotification(event) {
-    const dataView = event.target.value;
+    this.lastNotificationAt = Date.now();
+    this.handleCharacteristicValue(event.target.value);
+  }
+
+  async readCurrentValue() {
+    if (!this.isConnected || this.isReading || !this.characteristic || !this.characteristic.properties.read) return;
+    this.isReading = true;
+    try {
+      const value = await this.characteristic.readValue();
+      if (this.isConnected) this.handleCharacteristicValue(value);
+    } catch (error) {
+      console.warn("[BLE STREAM] Não foi possível ler o valor atual do sensor:", error);
+    } finally {
+      this.isReading = false;
+    }
+  }
+
+  handleCharacteristicValue(dataView) {
     if (this.activeProfile && this.activeProfile.format === "leanstar-packet" && dataView.byteLength >= 12) {
       const rawAdc = dataView.getUint16(0, true);
       const voltage = dataView.getFloat32(4, true);
@@ -246,6 +280,8 @@ class LeanstarBLEManager {
 
   handleDisconnection() {
     this.isConnected = false;
+    if (this.readTimer !== null) window.clearInterval(this.readTimer);
+    this.readTimer = null;
     this.characteristic = null;
     this.activeProfile = null;
     this.server = null;
