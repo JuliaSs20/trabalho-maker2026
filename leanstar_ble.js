@@ -248,7 +248,7 @@ class LeanstarBLEManager {
       if (supportsNotifications) {
         this.characteristic.addEventListener(
           'characteristicvaluechanged',
-          (event) => this.handleCharacteristicNotification(event)
+          (event) => this.handleDataChanged(event)
         );
         await this.characteristic.startNotifications();
       } else if (!this.characteristic.properties.read) {
@@ -292,7 +292,7 @@ class LeanstarBLEManager {
     }, delayMs);
   }
 
-  handleCharacteristicNotification(event) {
+  handleDataChanged(event) {
     this.lastNotificationAt = Date.now();
     this.handleCharacteristicValue(event.target.value);
   }
@@ -331,7 +331,7 @@ class LeanstarBLEManager {
       return;
     }
 
-    this.textBuffer += this.decoder.decode(dataView);
+    this.textBuffer += this.decoder.decode(dataView, { stream: !flushText });
     const lines = this.textBuffer.split(/\r\n|\n|\r/);
     this.textBuffer = lines.pop() || "";
     lines.forEach((line) => this.processTextReading(line));
@@ -354,11 +354,15 @@ class LeanstarBLEManager {
     if (!text) return;
 
     const percentMatch = text.match(/([-+]?(?:\d+\.?\d*|\.\d+))\s*%/);
-    const numberMatch = text.match(/[-+]?(?:\d+\.?\d*|\.\d+)/);
-    const numericValue = numberMatch ? Number(numberMatch[0]) : NaN;
+    const labeledAngleMatch = text.match(/(?:^|[^A-Za-zÀ-ÿ])(?:cotovelo|ângulo|angulo|angle|flex[aã]o)[^0-9+\-]{0,32}([-+]?(?:\d+\.?\d*|\.\d+))/i);
+    const numberMatch = labeledAngleMatch || text.match(/[-+]?(?:\d+\.?\d*|\.\d+)/);
+    const numericValue = labeledAngleMatch
+      ? Number(labeledAngleMatch[1])
+      : numberMatch ? Number(numberMatch[0]) : NaN;
     const explicitlyDegrees = /(?:°|\bdeg\b|graus?|ângulo|angulo|angle)/i.test(text);
     const isPercent = percentMatch !== null || (
       this.activeProfile && this.activeProfile.format === "text" &&
+      !labeledAngleMatch &&
       Number.isFinite(numericValue) && numericValue >= 0 && numericValue <= 100 &&
       !explicitlyDegrees
     );
@@ -368,7 +372,7 @@ class LeanstarBLEManager {
       : numericValue;
 
     if (!Number.isFinite(angleDeg) || angleDeg < 0 || angleDeg > 180 || (rawPercent !== null && (rawPercent < 0 || rawPercent > 100))) {
-      console.warn("[BLE STREAM] Leitura ignorada; esperava ângulo de 0 a 180° ou percentual de 0 a 100%:", text);
+      console.warn("[BLE STREAM] Leitura ignorada; esperava ângulo identificado (0–180°) ou percentual (0–100%):", text);
       return;
     }
 
