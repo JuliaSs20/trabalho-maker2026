@@ -791,6 +791,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const isWithinTarget = isSensorEvaluation
       ? Boolean(rangeMatch && angleDeg >= Number(rangeMatch[1]) && angleDeg <= Number(rangeMatch[2]))
       : data.qualidadeExecucao.status === 'EXCELENTE';
+    const sensorDisplayValue = isSensorEvaluation && Number.isInteger(data.sensorTelemetry.integerValue)
+      ? String(data.sensorTelemetry.integerValue)
+      : angleDeg.toFixed(1);
     const needsCorrection = !isWithinTarget;
     const status = isWithinTarget ? 'EXCELENTE' : 'ATENÇÃO';
     const msg = isSensorEvaluation
@@ -818,7 +821,7 @@ document.addEventListener('DOMContentLoaded', () => {
       canvasWarningToast.classList.add('hidden');
     }
 
-    valKneeAngle.textContent = `${angleDeg.toFixed(1)}°`;
+    valKneeAngle.textContent = `${sensorDisplayValue}°`;
     if (targetKneeAngle && data.targetRange) {
       targetKneeAngle.textContent = `Alvo: ${data.targetRange}`;
     }
@@ -855,11 +858,14 @@ document.addEventListener('DOMContentLoaded', () => {
         bleReadingWatchdogTimer = null;
       }
       sessionUsedBleSensor = true;
-      // Render the physical reading directly; updatePatientUI then applies the target-range alert.
-      valKneeAngle.textContent = `${sensorAngle.toFixed(1)}°`;
-      const liveReadingLabel = Number.isFinite(reading.rawPercent)
-        ? `${reading.rawPercent.toFixed(0)}% → ${sensorAngle.toFixed(1)}°`
+      const sensorAngleLabel = Number.isInteger(reading.integerValue)
+        ? `${reading.integerValue}°`
         : `${sensorAngle.toFixed(1)}°`;
+      // Render the physical reading directly; updatePatientUI then applies the target-range alert.
+      valKneeAngle.textContent = sensorAngleLabel;
+      const liveReadingLabel = Number.isFinite(reading.rawPercent)
+        ? `${reading.rawPercent.toFixed(0)}% → ${sensorAngleLabel}`
+        : sensorAngleLabel;
       updateStatusText(`Sensor BLE recebendo: ${liveReadingLabel}`, "green");
       const data = analyzer.processSensorAngle(sensorAngle);
       data.sensorTelemetry = { ...reading, angleDeg: sensorAngle };

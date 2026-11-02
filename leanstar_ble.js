@@ -353,6 +353,23 @@ class LeanstarBLEManager {
     const text = value.trim().replace(',', '.');
     if (!text) return;
 
+    // The Arduino's current text protocol is exactly "Cotovelo:XX", with XX in 0–100.
+    const elbowIntegerMatch = text.match(/^Cotovelo\s*:\s*(\d+)$/i);
+    if (elbowIntegerMatch) {
+      const integerValue = Number.parseInt(elbowIntegerMatch[1], 10);
+      if (integerValue < 0 || integerValue > 100) {
+        console.warn("[BLE STREAM] Valor Cotovelo ignorado; esperava inteiro de 0 a 100:", text);
+        return;
+      }
+      this.onDataCallback({
+        timestamp: Date.now(),
+        angleDeg: integerValue,
+        integerValue,
+        rawValue: text
+      });
+      return;
+    }
+
     const percentMatch = text.match(/([-+]?(?:\d+\.?\d*|\.\d+))\s*%/);
     const labeledAngleMatch = text.match(/(?:^|[^A-Za-zÀ-ÿ])(?:cotovelo|ângulo|angulo|angle|flex[aã]o)[^0-9+\-]{0,32}([-+]?(?:\d+\.?\d*|\.\d+))/i);
     const numberMatch = labeledAngleMatch || text.match(/[-+]?(?:\d+\.?\d*|\.\d+)/);
