@@ -855,6 +855,8 @@ document.addEventListener('DOMContentLoaded', () => {
         bleReadingWatchdogTimer = null;
       }
       sessionUsedBleSensor = true;
+      // Render the physical reading directly; updatePatientUI then applies the target-range alert.
+      valKneeAngle.textContent = `${sensorAngle.toFixed(1)}°`;
       const liveReadingLabel = Number.isFinite(reading.rawPercent)
         ? `${reading.rawPercent.toFixed(0)}% → ${sensorAngle.toFixed(1)}°`
         : `${sensorAngle.toFixed(1)}°`;
