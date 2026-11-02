@@ -75,6 +75,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentJSONProtocol = "";
   let sessionLogs = [];
   let sessionUsedBleSensor = false;
+  let bleReadingWatchdogTimer = null;
 
   // Estado do Motor MediaPipe Pose & Conexão de Mídia
   let poseEngine = null;
@@ -832,6 +833,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const bleSensor = new window.LeanstarBLEManager(
     (reading) => {
+      if (bleReadingWatchdogTimer !== null) {
+        window.clearTimeout(bleReadingWatchdogTimer);
+        bleReadingWatchdogTimer = null;
+      }
       sessionUsedBleSensor = true;
       const liveReadingLabel = Number.isFinite(reading.rawPercent)
         ? `${reading.rawPercent.toFixed(0)}% → ${reading.angleDeg.toFixed(1)}°`
@@ -848,6 +853,25 @@ document.addEventListener('DOMContentLoaded', () => {
         feedbackTag.textContent = "AGUARDANDO LEITURA DO SENSOR";
         feedbackMainMsg.textContent = "Sensor conectado. Aguardando o primeiro ângulo do Arduino.";
         valKneeAngle.textContent = "--°";
+        hudKneeAngle.textContent = "--°";
+        hudPhaseText.textContent = "AGUARDANDO LEITURA";
+        if (barKneeFlexion) barKneeFlexion.style.width = "0%";
+        if (bleReadingWatchdogTimer !== null) window.clearTimeout(bleReadingWatchdogTimer);
+        bleReadingWatchdogTimer = window.setTimeout(() => {
+          bleReadingWatchdogTimer = null;
+          if (!bleSensor.isConnected) return;
+          patientFeedbackCard.className = "patient-feedback-card status-danger";
+          feedbackTag.textContent = "SENSOR SEM DADOS";
+          feedbackMainMsg.textContent = "Bluetooth conectado, mas nenhuma leitura chegou. Confira se o Arduino está enviando valores pela característica BLE.";
+          updateStatusText("Sensor conectado, aguardando dados do Arduino", "red");
+        }, 2500);
+      } else {
+        if (bleReadingWatchdogTimer !== null) {
+          window.clearTimeout(bleReadingWatchdogTimer);
+          bleReadingWatchdogTimer = null;
+        }
+        if (valKneeAngle) valKneeAngle.textContent = "--°";
+        if (hudKneeAngle) hudKneeAngle.textContent = "--°";
       }
       if (btnConnectSensor) {
         btnConnectSensor.classList.toggle('btn-outline', !connected);
