@@ -771,8 +771,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // Do not let a camera frame already in progress overwrite live BLE telemetry.
     if (bleSensor && bleSensor.isConnected && !isSensorEvaluation) return;
 
+    const angleDeg = isSensorEvaluation
+      ? Number(data.sensorTelemetry.angleDeg)
+      : Number(data.angulosAtuais.principalDeg);
+    if (!Number.isFinite(angleDeg) || angleDeg < 0 || angleDeg > 180) return;
+    if (isSensorEvaluation) data.angulosAtuais.principalDeg = angleDeg;
+
     hudPhaseText.textContent = data.faseMovimento ? data.faseMovimento.toUpperCase() : "NEUTRO";
-    hudKneeAngle.textContent = `${data.angulosAtuais.principalDeg.toFixed(0)}°`;
+    hudKneeAngle.textContent = `${angleDeg.toFixed(0)}°`;
     if (hudAngleSub) hudAngleSub.textContent = data.targetJointName || "Ângulo Alvo";
 
     // Regulador de Distância
@@ -781,15 +787,21 @@ document.addEventListener('DOMContentLoaded', () => {
       canvasDistanceToast.className = `canvas-distance-toast ${data.distanceEval.status.toLowerCase().replace('_', '-')}`;
     }
 
-    const status = data.qualidadeExecucao.status;
-    const msg = data.qualidadeExecucao.mensagemFeedback;
+    const rangeMatch = String(data.targetRange || "").match(/([\d.]+)°\s*a\s*([\d.]+)°/);
+    const isWithinTarget = isSensorEvaluation
+      ? Boolean(rangeMatch && angleDeg >= Number(rangeMatch[1]) && angleDeg <= Number(rangeMatch[2]))
+      : data.qualidadeExecucao.status === 'EXCELENTE';
+    const needsCorrection = !isWithinTarget;
+    const status = isWithinTarget ? 'EXCELENTE' : 'ATENÇÃO';
+    const msg = isSensorEvaluation
+      ? isWithinTarget
+        ? `Ângulo do sensor dentro da faixa-alvo (${data.targetRange}).`
+        : `Ajuste o movimento. Ângulo do sensor: ${angleDeg.toFixed(1)}°. Alvo: ${data.targetRange}.`
+      : data.qualidadeExecucao.mensagemFeedback;
 
-    const needsCorrection = status !== 'EXCELENTE';
     patientFeedbackCard.className = `patient-feedback-card status-${status === 'EXCELENTE' ? 'good' : (status === 'ATENÇÃO' ? 'warning' : 'danger')}`;
     feedbackTag.textContent = needsCorrection ? 'CORREÇÃO NECESSÁRIA' : (isSensorEvaluation ? 'AVALIAÇÃO DE AMPLITUDE' : 'EXCELENTE POSTURA');
-    feedbackMainMsg.textContent = isSensorEvaluation && needsCorrection
-      ? `Ajuste o movimento. Ângulo atual: ${data.angulosAtuais.principalDeg.toFixed(1)}°. Alvo: ${data.targetRange}.`
-      : msg;
+    feedbackMainMsg.textContent = msg;
     if (feedbackIconContainer) {
       feedbackIconContainer.innerHTML = `<i data-lucide="${needsCorrection ? 'alert-triangle' : 'check-circle-2'}"></i>`;
       if (window.lucide) lucide.createIcons({ root: feedbackIconContainer });
@@ -806,11 +818,11 @@ document.addEventListener('DOMContentLoaded', () => {
       canvasWarningToast.classList.add('hidden');
     }
 
-    valKneeAngle.textContent = `${data.angulosAtuais.principalDeg.toFixed(1)}°`;
+    valKneeAngle.textContent = `${angleDeg.toFixed(1)}°`;
     if (targetKneeAngle && data.targetRange) {
       targetKneeAngle.textContent = `Alvo: ${data.targetRange}`;
     }
-    const mainPct = Math.min(100, Math.max(0, (data.angulosAtuais.principalDeg / 180) * 100));
+    const mainPct = Math.min(100, Math.max(0, (angleDeg / 180) * 100));
     barKneeFlexion.style.width = `${mainPct}%`;
 
     valTrunkAngle.textContent = `${data.angulosAtuais.secundarioDeg.toFixed(1)}°`;
@@ -833,17 +845,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const bleSensor = new window.LeanstarBLEManager(
     (reading) => {
+      const sensorAngle = Number(reading && reading.angleDeg);
+      if (!Number.isFinite(sensorAngle) || sensorAngle < 0 || sensorAngle > 180) {
+        console.warn("[BLE STREAM] Leitura ignorada; ângulo do sensor inválido:", reading);
+        return;
+      }
       if (bleReadingWatchdogTimer !== null) {
         window.clearTimeout(bleReadingWatchdogTimer);
         bleReadingWatchdogTimer = null;
       }
       sessionUsedBleSensor = true;
       const liveReadingLabel = Number.isFinite(reading.rawPercent)
-        ? `${reading.rawPercent.toFixed(0)}% → ${reading.angleDeg.toFixed(1)}°`
-        : `${reading.angleDeg.toFixed(1)}°`;
+        ? `${reading.rawPercent.toFixed(0)}% → ${sensorAngle.toFixed(1)}°`
+        : `${sensorAngle.toFixed(1)}°`;
       updateStatusText(`Sensor BLE recebendo: ${liveReadingLabel}`, "green");
-      const data = analyzer.processSensorAngle(reading.angleDeg);
-      data.sensorTelemetry = reading;
+      const data = analyzer.processSensorAngle(sensorAngle);
+      data.sensorTelemetry = { ...reading, angleDeg: sensorAngle };
       updatePatientUI(data);
     },
     (connected, deviceName) => {
