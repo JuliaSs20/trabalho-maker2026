@@ -353,18 +353,19 @@ class LeanstarBLEManager {
     const text = value.trim().replace(',', '.');
     if (!text) return;
 
-    // The Arduino's current text protocol is exactly "Cotovelo:XX", with XX in 0–100.
+    // The Arduino's text protocol sends flexion progress, not degrees: "Cotovelo:XX" (0–100%).
     const elbowIntegerMatch = text.match(/^Cotovelo\s*:\s*(\d+)$/i);
     if (elbowIntegerMatch) {
-      const integerValue = Number.parseInt(elbowIntegerMatch[1], 10);
-      if (integerValue < 0 || integerValue > 100) {
+      const rawPercent = Number.parseInt(elbowIntegerMatch[1], 10);
+      if (rawPercent < 0 || rawPercent > 100) {
         console.warn("[BLE STREAM] Valor Cotovelo ignorado; esperava inteiro de 0 a 100:", text);
         return;
       }
+      const angleDeg = this.extendedAngleDeg + ((this.flexedAngleDeg - this.extendedAngleDeg) * rawPercent) / 100;
       this.onDataCallback({
         timestamp: Date.now(),
-        angleDeg: integerValue,
-        integerValue,
+        angleDeg: parseFloat(angleDeg.toFixed(1)),
+        rawPercent,
         rawValue: text
       });
       return;
