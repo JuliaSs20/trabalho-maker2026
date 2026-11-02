@@ -138,6 +138,14 @@ class LeanstarBLEManager {
     this.isConnected = false;
     this.readTimer = null;
     this.textFlushTimer = null;
+    this.reconnectTimer = null;
+    this.reconnectAttempts = 0;
+    this.isConnecting = false;
+    this.isReconnecting = false;
+    this.shouldReconnect = false;
+    this.disconnectRequested = false;
+    this.disconnectHandler = null;
+    this.listenerDevice = null;
     this.textBuffer = "";
     this.isReading = false;
     this.lastNotificationAt = 0;
@@ -175,10 +183,51 @@ class LeanstarBLEManager {
         optionalServices: this.BLE_PROFILES.map((profile) => profile.serviceUuid)
       });
 
-      this.device.addEventListener('gattserverdisconnected', () => this.handleDisconnection());
+      this.disconnectRequested = false;
+      this.shouldReconnect = false;
+      this.isReconnecting = false;
+      this.reconnectAttempts = 0;
+      if (this.listenerDevice && this.listenerDevice !== this.device && this.disconnectHandler) {
+        this.listenerDevice.removeEventListener('gattserverdisconnected', this.disconnectHandler);
+      }
+      if (!this.disconnectHandler) {
+        this.disconnectHandler = () => this.handleDisconnection();
+      }
+      if (this.listenerDevice !== this.device) {
+        this.device.addEventListener('gattserverdisconnected', this.disconnectHandler);
+        this.listenerDevice = this.device;
+      }
+      await this.openGattConnection();
+      this.shouldReconnect = true;
+      console.log("[WEB BLE] Pareado com sucesso! Recebendo ângulos do sensor...");
+      return true;
+    } catch (error) {
+      console.error("[WEB BLE] Erro ao conectar:", error);
+      this.isConnected = false;
+      if (this.readTimer !== null) window.clearInterval(this.readTimer);
+      if (this.textFlushTimer !== null) window.clearTimeout(this.textFlushTimer);
+      this.readTimer = null;
+      this.textFlushTimer = null;
+      this.textBuffer = "";
+      this.shouldReconnect = false;
+      this.isReconnecting = false;
+      if (this.reconnectTimer !== null) window.clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+      if (this.device && this.device.gatt && this.device.gatt.connected) {
+        this.device.gatt.disconnect();
+      }
+      throw error;
+    }
+  }
 
+  async openGattConnection() {
+    if (!this.device || !this.device.gatt || this.isConnecting) return false;
+    this.isConnecting = true;
+    try {
       console.log(`[WEB BLE] Conectando ao GATT Server de ${this.device.name || "sensor selecionado"}...`);
       this.server = await this.device.gatt.connect();
+      this.characteristic = null;
+      this.activeProfile = null;
 
       for (const profile of this.BLE_PROFILES) {
         try {
@@ -207,7 +256,10 @@ class LeanstarBLEManager {
       }
 
       this.isConnected = true;
-      this.onStatusCallback(true, this.device.name || "HM-06");
+      this.isReconnecting = false;
+      this.reconnectAttempts = 0;
+      this.lastNotificationAt = Date.now();
+      this.onStatusCallback(true, this.device.name || "HM-06", false);
       if (this.characteristic.properties.read) {
         this.readCurrentValue();
         this.readTimer = window.setInterval(() => {
@@ -215,21 +267,29 @@ class LeanstarBLEManager {
           if (!supportsNotifications || notificationsStalled) this.readCurrentValue();
         }, 200);
       }
-      console.log("[WEB BLE] Pareado com sucesso! Recebendo ângulos do sensor...");
       return true;
-    } catch (error) {
-      console.error("[WEB BLE] Erro ao conectar:", error);
-      this.isConnected = false;
-      if (this.readTimer !== null) window.clearInterval(this.readTimer);
-      if (this.textFlushTimer !== null) window.clearTimeout(this.textFlushTimer);
-      this.readTimer = null;
-      this.textFlushTimer = null;
-      this.textBuffer = "";
-      if (this.device && this.device.gatt && this.device.gatt.connected) {
-        this.device.gatt.disconnect();
-      }
-      throw error;
+    } finally {
+      this.isConnecting = false;
     }
+  }
+
+  scheduleReconnect() {
+    if (!this.shouldReconnect || this.disconnectRequested || this.reconnectTimer !== null) return;
+    this.isReconnecting = true;
+    this.reconnectAttempts += 1;
+    const delayMs = Math.min(10000, 1000 * (2 ** Math.min(this.reconnectAttempts - 1, 4)));
+    this.onStatusCallback(false, this.device ? this.device.name || "HM-06" : "HM-06", true);
+    console.warn(`[WEB BLE] Reconexão ${this.reconnectAttempts} em ${delayMs / 1000}s...`);
+    this.reconnectTimer = window.setTimeout(async () => {
+      this.reconnectTimer = null;
+      if (!this.shouldReconnect || this.disconnectRequested || !this.device || !this.device.gatt) return;
+      try {
+        await this.openGattConnection();
+      } catch (error) {
+        console.warn("[WEB BLE] Tentativa de reconexão falhou:", error);
+        this.scheduleReconnect();
+      }
+    }, delayMs);
   }
 
   handleCharacteristicNotification(event) {
@@ -330,11 +390,20 @@ class LeanstarBLEManager {
     this.characteristic = null;
     this.activeProfile = null;
     this.server = null;
-    this.onStatusCallback(false, this.device ? this.device.name || "HM-06" : "HM-06");
     console.warn("[WEB BLE] Sensor Bluetooth desconectado.");
+    if (this.shouldReconnect && !this.disconnectRequested) {
+      this.scheduleReconnect();
+    } else {
+      this.onStatusCallback(false, this.device ? this.device.name || "HM-06" : "HM-06", false);
+    }
   }
 
   async disconnect() {
+    this.disconnectRequested = true;
+    this.shouldReconnect = false;
+    this.isReconnecting = false;
+    if (this.reconnectTimer !== null) window.clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
     if (this.device && this.device.gatt && this.device.gatt.connected) {
       this.device.gatt.disconnect();
     } else {

@@ -863,7 +863,7 @@ document.addEventListener('DOMContentLoaded', () => {
       data.sensorTelemetry = { ...reading, angleDeg: sensorAngle };
       updatePatientUI(data);
     },
-    (connected, deviceName) => {
+    (connected, deviceName, reconnecting = false) => {
       if (connected) {
         sessionUsedBleSensor = true;
         patientFeedbackCard.className = "patient-feedback-card status-warning";
@@ -889,18 +889,26 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (valKneeAngle) valKneeAngle.textContent = "--°";
         if (hudKneeAngle) hudKneeAngle.textContent = "--°";
+        if (reconnecting) {
+          patientFeedbackCard.className = "patient-feedback-card status-warning";
+          feedbackTag.textContent = "RECONEXÃO BLUETOOTH";
+          feedbackMainMsg.textContent = "A conexão com o sensor caiu. Tentando reconectar automaticamente.";
+          if (hudPhaseText) hudPhaseText.textContent = "RECONEXÃO BLUETOOTH";
+        }
       }
       if (btnConnectSensor) {
-        btnConnectSensor.classList.toggle('btn-outline', !connected);
-        btnConnectSensor.classList.toggle('btn-primary', connected);
+        btnConnectSensor.classList.toggle('btn-outline', !connected && !reconnecting);
+        btnConnectSensor.classList.toggle('btn-primary', connected || reconnecting);
         btnConnectSensor.innerHTML = '<i data-lucide="bluetooth"></i><span class="btn-text"></span>';
         btnConnectSensor.querySelector('.btn-text').textContent = connected
           ? `Desconectar ${deviceName}`
-          : "Conectar sensor BLE";
+          : reconnecting ? "Cancelar reconexão" : "Conectar sensor BLE";
         if (window.lucide) lucide.createIcons();
       }
       updateStatusText(
-        connected ? `Sensor BLE conectado; aguardando dados: ${deviceName}` : "Sensor BLE desconectado",
+        connected
+          ? `Sensor BLE conectado: ${deviceName}`
+          : reconnecting ? "Conexão BLE perdida; tentando reconectar..." : "Sensor BLE desconectado",
         connected ? "green" : "amber"
       );
     }
@@ -958,7 +966,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // 2. Conexão do sensor por Bluetooth BLE
   if (btnConnectSensor) {
     btnConnectSensor.addEventListener('click', async () => {
-      if (bleSensor.isConnected) {
+      if (bleSensor.isConnected || bleSensor.isReconnecting) {
         await bleSensor.disconnect();
         return;
       }
