@@ -137,6 +137,8 @@ class LeanstarBLEManager {
     this.activeProfile = null;
     this.isConnected = false;
     this.readTimer = null;
+    this.textFlushTimer = null;
+    this.textBuffer = "";
     this.isReading = false;
     this.lastNotificationAt = 0;
 
@@ -144,6 +146,10 @@ class LeanstarBLEManager {
     this.onStatusCallback = onStatusCallback || (() => {});
     this.decoder = new TextDecoder('utf-8');
     this.angleConverter = new LeanstarAngleConverter();
+    // The Arduino sketch sends 0% at extension and 100% at flexion.
+    // Map that range to the elbow's expected 180°-to-45° interior angle.
+    this.extendedAngleDeg = 180;
+    this.flexedAngleDeg = 45;
   }
 
   /**
@@ -215,7 +221,10 @@ class LeanstarBLEManager {
       console.error("[WEB BLE] Erro ao conectar:", error);
       this.isConnected = false;
       if (this.readTimer !== null) window.clearInterval(this.readTimer);
+      if (this.textFlushTimer !== null) window.clearTimeout(this.textFlushTimer);
       this.readTimer = null;
+      this.textFlushTimer = null;
+      this.textBuffer = "";
       if (this.device && this.device.gatt && this.device.gatt.connected) {
         this.device.gatt.disconnect();
       }
@@ -233,7 +242,7 @@ class LeanstarBLEManager {
     this.isReading = true;
     try {
       const value = await this.characteristic.readValue();
-      if (this.isConnected) this.handleCharacteristicValue(value);
+      if (this.isConnected) this.handleCharacteristicValue(value, true);
     } catch (error) {
       console.warn("[BLE STREAM] Não foi possível ler o valor atual do sensor:", error);
     } finally {
@@ -241,7 +250,7 @@ class LeanstarBLEManager {
     }
   }
 
-  handleCharacteristicValue(dataView) {
+  handleCharacteristicValue(dataView, flushText = false) {
     if (this.activeProfile && this.activeProfile.format === "leanstar-packet" && dataView.byteLength >= 12) {
       const rawAdc = dataView.getUint16(0, true);
       const voltage = dataView.getFloat32(4, true);
@@ -262,18 +271,51 @@ class LeanstarBLEManager {
       return;
     }
 
-    const text = this.decoder.decode(dataView).trim().replace(',', '.');
-    const match = text.match(/[-+]?(?:\d+\.?\d*|\.\d+)/);
-    const angleDeg = match ? Number(match[0]) : NaN;
+    this.textBuffer += this.decoder.decode(dataView);
+    const lines = this.textBuffer.split(/\r\n|\n|\r/);
+    this.textBuffer = lines.pop() || "";
+    lines.forEach((line) => this.processTextReading(line));
 
-    if (!Number.isFinite(angleDeg) || angleDeg < 0 || angleDeg > 180) {
-      console.warn("[BLE STREAM] Leitura ignorada; esperava um ângulo em texto entre 0 e 180 graus:", text);
+    if (flushText && this.textBuffer.trim()) {
+      this.processTextReading(this.textBuffer);
+      this.textBuffer = "";
+    } else if (this.textBuffer.trim() && this.textFlushTimer === null) {
+      this.textFlushTimer = window.setTimeout(() => {
+        this.textFlushTimer = null;
+        const pendingText = this.textBuffer;
+        this.textBuffer = "";
+        this.processTextReading(pendingText);
+      }, 50);
+    }
+  }
+
+  processTextReading(value) {
+    const text = value.trim().replace(',', '.');
+    if (!text) return;
+
+    const percentMatch = text.match(/([-+]?(?:\d+\.?\d*|\.\d+))\s*%/);
+    const numberMatch = text.match(/[-+]?(?:\d+\.?\d*|\.\d+)/);
+    const numericValue = numberMatch ? Number(numberMatch[0]) : NaN;
+    const explicitlyDegrees = /(?:°|\bdeg\b|graus?|ângulo|angulo|angle)/i.test(text);
+    const isPercent = percentMatch !== null || (
+      this.activeProfile && this.activeProfile.format === "text" &&
+      Number.isFinite(numericValue) && numericValue >= 0 && numericValue <= 100 &&
+      !explicitlyDegrees
+    );
+    const rawPercent = percentMatch ? Number(percentMatch[1]) : isPercent ? numericValue : null;
+    const angleDeg = rawPercent !== null
+      ? this.extendedAngleDeg + ((this.flexedAngleDeg - this.extendedAngleDeg) * rawPercent) / 100
+      : numericValue;
+
+    if (!Number.isFinite(angleDeg) || angleDeg < 0 || angleDeg > 180 || (rawPercent !== null && (rawPercent < 0 || rawPercent > 100))) {
+      console.warn("[BLE STREAM] Leitura ignorada; esperava ângulo de 0 a 180° ou percentual de 0 a 100%:", text);
       return;
     }
 
     this.onDataCallback({
       timestamp: Date.now(),
       angleDeg: parseFloat(angleDeg.toFixed(1)),
+      ...(rawPercent !== null ? { rawPercent } : {}),
       rawValue: text
     });
   }
@@ -281,7 +323,10 @@ class LeanstarBLEManager {
   handleDisconnection() {
     this.isConnected = false;
     if (this.readTimer !== null) window.clearInterval(this.readTimer);
+    if (this.textFlushTimer !== null) window.clearTimeout(this.textFlushTimer);
     this.readTimer = null;
+    this.textFlushTimer = null;
+    this.textBuffer = "";
     this.characteristic = null;
     this.activeProfile = null;
     this.server = null;

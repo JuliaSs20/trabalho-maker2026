@@ -75,7 +75,6 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentJSONProtocol = "";
   let sessionLogs = [];
   let sessionUsedBleSensor = false;
-  let hasReceivedBleReading = false;
 
   // Estado do Motor MediaPipe Pose & Conexão de Mídia
   let poseEngine = null;
@@ -834,10 +833,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const bleSensor = new window.LeanstarBLEManager(
     (reading) => {
       sessionUsedBleSensor = true;
-      if (!hasReceivedBleReading) {
-        hasReceivedBleReading = true;
-        updateStatusText(`Sensor BLE recebendo ângulo: ${reading.angleDeg.toFixed(1)}°`, "green");
-      }
+      const liveReadingLabel = Number.isFinite(reading.rawPercent)
+        ? `${reading.rawPercent.toFixed(0)}% → ${reading.angleDeg.toFixed(1)}°`
+        : `${reading.angleDeg.toFixed(1)}°`;
+      updateStatusText(`Sensor BLE recebendo: ${liveReadingLabel}`, "green");
       const data = analyzer.processSensorAngle(reading.angleDeg);
       data.sensorTelemetry = reading;
       updatePatientUI(data);
@@ -845,7 +844,6 @@ document.addEventListener('DOMContentLoaded', () => {
     (connected, deviceName) => {
       if (connected) {
         sessionUsedBleSensor = true;
-        hasReceivedBleReading = false;
         patientFeedbackCard.className = "patient-feedback-card status-warning";
         feedbackTag.textContent = "AGUARDANDO LEITURA DO SENSOR";
         feedbackMainMsg.textContent = "Sensor conectado. Aguardando o primeiro ângulo do Arduino.";
