@@ -78,8 +78,6 @@ document.addEventListener('DOMContentLoaded', () => {
   let sessionUsedBleSensor = false;
   let bleReadingWatchdogTimer = null;
   let latestSensorReading = null;
-  let sensorDisplayMinAngle = Infinity;
-  let sensorDisplayMaxAngle = -Infinity;
   let latestSensorUiData = null;
   let sensorUiUpdateTimer = null;
   let lastBleStatusUpdateAt = 0;
@@ -87,14 +85,11 @@ document.addEventListener('DOMContentLoaded', () => {
   let latestCameraCorrection = null;
   let latestCameraFeedback = "";
 
-  // Reescala somente os valores apresentados na interface para 0°–45°.
+  // Converte a leitura observada de 0°–7,7° em uma escala visual invertida de 45°–0°.
   // A análise biomecânica continua usando o ângulo original do sensor.
   function mapSensorAngleForDisplay(angleDeg) {
-    sensorDisplayMinAngle = Math.min(sensorDisplayMinAngle, angleDeg);
-    sensorDisplayMaxAngle = Math.max(sensorDisplayMaxAngle, angleDeg);
-    const observedRange = sensorDisplayMaxAngle - sensorDisplayMinAngle;
-    if (observedRange === 0) return 0;
-    return ((angleDeg - sensorDisplayMinAngle) / observedRange) * 45;
+    const displayAngle = ((7.7 - angleDeg) / 7.7) * 45;
+    return Math.min(45, Math.max(0, displayAngle));
   }
 
   // Estado do Motor MediaPipe Pose & Conexão de Mídia
@@ -1012,8 +1007,6 @@ document.addEventListener('DOMContentLoaded', () => {
       if (connected) {
         sessionUsedBleSensor = true;
         latestSensorReading = null;
-        sensorDisplayMinAngle = Infinity;
-        sensorDisplayMaxAngle = -Infinity;
         latestCameraCorrection = null;
         latestCameraFeedback = "";
         updateBleCameraPreviewLayer();
