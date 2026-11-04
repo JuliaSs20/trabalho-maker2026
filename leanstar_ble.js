@@ -65,7 +65,9 @@ class LeanstarAngleConverter {
     // agachamento e rosca direta sempre reutilizam os mesmos pontos de leitura.
     this.calibrationStorageKey = "leanstar-angle-calibration-v1";
     this.loadCalibration();
-    this.filter = new LeanstarSignalFilter(6, 0.22);
+    // Menos suavização para acompanhar a flexão com menor atraso, mantendo
+    // uma pequena média móvel para reduzir oscilações entre amostras.
+    this.filter = new LeanstarSignalFilter(2, 0.65);
     this.lastFilteredVoltage = 2.150;
   }
 
