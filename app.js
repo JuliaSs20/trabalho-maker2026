@@ -183,7 +183,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function onPoseResults(results) {
-    if (!isRunning || bleSensor.isConnected) return;
+    if (!isRunning) return;
     resizeCanvas();
 
     const width = canvasElement.width;
@@ -202,6 +202,9 @@ document.addEventListener('DOMContentLoaded', () => {
       canvasCtx.drawImage(results.image, 0, 0, width, height);
       canvasCtx.restore();
     }
+
+    // Preserve live video while BLE owns the angle and feedback UI.
+    if (bleSensor.isConnected) return;
 
     if (results.poseLandmarks && results.poseLandmarks.length >= 33) {
       const processedData = analyzer.processFrame(results.poseLandmarks, useFilter);
@@ -966,6 +969,19 @@ document.addEventListener('DOMContentLoaded', () => {
   async function mainLoop() {
     if (!isRunning) return;
     if (bleSensor.isConnected) {
+      const sourceMode = sourceSelect.value;
+      if ((sourceMode === 'webcam' || sourceMode === 'video') &&
+          videoElement && videoElement.readyState >= 2 && !videoElement.paused && !videoElement.ended) {
+        resizeCanvas();
+        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+        canvasCtx.save();
+        if (sourceMode === 'webcam') {
+          canvasCtx.translate(canvasElement.width, 0);
+          canvasCtx.scale(-1, 1);
+        }
+        canvasCtx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+        canvasCtx.restore();
+      }
       animationFrameId = requestAnimationFrame(mainLoop);
       return;
     }
@@ -984,13 +1000,11 @@ document.addEventListener('DOMContentLoaded', () => {
       if (videoElement && videoElement.readyState >= 2 && !videoElement.paused && !videoElement.ended) {
         if (poseEngine && !isSendingFrame) {
           isSendingFrame = true;
-          try {
-            await poseEngine.send({ image: videoElement });
-          } catch (err) {
+          poseEngine.send({ image: videoElement })
+            .catch((err) => {
             console.error("Erro no envio do frame para o MediaPipe:", err);
-          } finally {
-            isSendingFrame = false;
-          }
+            })
+            .finally(() => { isSendingFrame = false; });
         }
       }
     }
