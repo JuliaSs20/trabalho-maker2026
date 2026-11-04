@@ -53,31 +53,30 @@ class LeanstarSignalFilter {
 }
 
 /**
- * Motor de Calibração e Mapeamento Voltagem -> Ângulo Articular (0° a 180°)
+ * Motor de Calibração e Mapeamento Voltagem -> Ângulo de flexão exibido (0° a 45°)
  */
 class LeanstarAngleConverter {
   constructor() {
     // Valores padrão iniciais (Volts) caso o paciente ainda não tenha calibrado
-    this.voltageStraight180Deg = 2.150; // Braço estendido (180°)
-    // A tensão de referência corresponde ao limite de flexão configurado em 45°.
-    this.voltageBent45Deg = 1.687; // Braço flexionado (45°)
+    this.voltageStraight180Deg = 2.070; // Referência aproximada observada com o braço reto (0°)
+    this.voltageBent45Deg = 1.687; // Braço flexionado (exibição próxima de 45°)
     this.filter = new LeanstarSignalFilter(1, 0.85);
-    this.lastFilteredVoltage = 2.150;
+    this.lastFilteredVoltage = 2.070;
   }
 
   /**
-   * Calibra o ponto de extensão total (braço estendido = 180°)
-   * @param {number} currentVoltage Tensão lida com o braço estendido a 180°
+   * Calibra o ponto de extensão total (braço estendido = 0° exibidos)
+   * @param {number} currentVoltage Tensão lida com o braço estendido
    */
   calibrateExtension180Degrees(currentVoltage = this.lastFilteredVoltage) {
     this.voltageStraight180Deg = currentVoltage;
-    console.info(`[CALIBRAÇÃO LEANSTAR] Braço estendido (180°) salvo em: ${currentVoltage.toFixed(3)} V`);
+    console.info(`[CALIBRAÇÃO LEANSTAR] Braço estendido (0° exibidos) salvo em: ${currentVoltage.toFixed(3)} V`);
     return this.voltageStraight180Deg;
   }
 
   /**
-   * Calibra o ponto de flexão de referência (braço flexionado = 45°)
-   * @param {number} currentVoltage Tensão lida com o braço flexionado a 45°
+   * Calibra o ponto de flexão de referência (braço flexionado = 45° exibidos)
+   * @param {number} currentVoltage Tensão lida com o braço flexionado
    */
   calibrateFlexed45Degrees(currentVoltage = this.lastFilteredVoltage) {
     // Evita divisão por zero caso o usuário clique nos dois botões na mesma posição
@@ -91,7 +90,7 @@ class LeanstarAngleConverter {
   }
 
   /**
-   * Converte a voltagem recebida em um ângulo articular suavizado (0° a 180°)
+   * Converte a voltagem recebida em um ângulo de flexão suavizado (0° a 45°)
    * Utiliza interpolação/extrapolação linear calibrada com clamping seguro.
    */
   voltageToAngle(rawVoltage) {
@@ -99,15 +98,15 @@ class LeanstarAngleConverter {
     const cleanVoltage = this.filter.process(rawVoltage);
     this.lastFilteredVoltage = cleanVoltage;
 
-    // 2. Interpolação entre braço estendido (180°) e flexionado (45°).
+    // 2. Interpolação entre braço estendido (0° exibidos) e flexionado (45°).
     const deltaVCalib = this.voltageBent45Deg - this.voltageStraight180Deg;
     if (Math.abs(deltaVCalib) < 0.001) return NaN;
 
     const flexionProgress = (cleanVoltage - this.voltageStraight180Deg) / deltaVCalib;
-    let angleDeg = 180.0 - (flexionProgress * 135.0);
+    let angleDeg = flexionProgress * 45.0;
 
-    // 3. Limita a leitura ao intervalo esperado: 45° flexionado a 180° estendido.
-    angleDeg = Math.max(45.0, Math.min(180.0, angleDeg));
+    // 3. Limita somente a exibição ao intervalo solicitado, sem mudar o sensor.
+    angleDeg = Math.max(0.0, Math.min(45.0, angleDeg));
 
     return parseFloat(angleDeg.toFixed(1));
   }
@@ -156,9 +155,6 @@ class LeanstarBLEManager {
     this.decoder = new TextDecoder('utf-8');
     this.angleConverter = new LeanstarAngleConverter();
     // The Arduino sketch sends 0% at extension and 100% at flexion.
-    // Map that range to the elbow's expected 180°-to-45° interior angle.
-    this.extendedAngleDeg = 180;
-    this.flexedAngleDeg = 45;
   }
 
   /**
@@ -362,7 +358,7 @@ class LeanstarBLEManager {
         console.warn("[BLE STREAM] Valor Cotovelo ignorado; esperava inteiro de 0 a 100:", text);
         return;
       }
-      const angleDeg = this.extendedAngleDeg + ((this.flexedAngleDeg - this.extendedAngleDeg) * rawPercent) / 100;
+      const angleDeg = (45 * rawPercent) / 100;
       this.onDataCallback({
         timestamp: Date.now(),
         angleDeg: parseFloat(angleDeg.toFixed(1)),
@@ -387,7 +383,7 @@ class LeanstarBLEManager {
     );
     const rawPercent = percentMatch ? Number(percentMatch[1]) : isPercent ? numericValue : null;
     const angleDeg = rawPercent !== null
-      ? this.extendedAngleDeg + ((this.flexedAngleDeg - this.extendedAngleDeg) * rawPercent) / 100
+      ? (45 * rawPercent) / 100
       : numericValue;
 
     if (!Number.isFinite(angleDeg) || angleDeg < 0 || angleDeg > 180 || (rawPercent !== null && (rawPercent < 0 || rawPercent > 100))) {
