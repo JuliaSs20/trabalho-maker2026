@@ -61,43 +61,8 @@ class LeanstarAngleConverter {
     this.voltageStraight180Deg = 2.150; // Braço estendido (180°)
     // A tensão de referência corresponde ao limite de flexão configurado em 45°.
     this.voltageBent45Deg = 1.687; // Braço flexionado (45°)
-    // A calibração pertence ao sensor, não ao exercício selecionado. Assim,
-    // agachamento e rosca direta sempre reutilizam os mesmos pontos de leitura.
-    this.calibrationStorageKey = "leanstar-angle-calibration-v1";
-    this.loadCalibration();
-    // Menos suavização para acompanhar a flexão com menor atraso, mantendo
-    // uma pequena média móvel para reduzir oscilações entre amostras.
     this.filter = new LeanstarSignalFilter(2, 0.65);
     this.lastFilteredVoltage = 2.150;
-  }
-
-  loadCalibration() {
-    try {
-      if (typeof localStorage === "undefined") return;
-      const saved = JSON.parse(localStorage.getItem(this.calibrationStorageKey) || "null");
-      const straight = Number(saved && saved.voltageStraight180Deg);
-      const bent = Number(saved && saved.voltageBent45Deg);
-      if (Number.isFinite(straight) && Number.isFinite(bent) &&
-          straight >= 0 && straight <= 3.3 && bent >= 0 && bent <= 3.3 &&
-          Math.abs(straight - bent) >= 0.02) {
-        this.voltageStraight180Deg = straight;
-        this.voltageBent45Deg = bent;
-      }
-    } catch (error) {
-      console.warn("[CALIBRAÇÃO LEANSTAR] Não foi possível carregar a calibração salva:", error);
-    }
-  }
-
-  saveCalibration() {
-    try {
-      if (typeof localStorage === "undefined") return;
-      localStorage.setItem(this.calibrationStorageKey, JSON.stringify({
-        voltageStraight180Deg: this.voltageStraight180Deg,
-        voltageBent45Deg: this.voltageBent45Deg
-      }));
-    } catch (error) {
-      console.warn("[CALIBRAÇÃO LEANSTAR] Não foi possível salvar a calibração:", error);
-    }
   }
 
   /**
@@ -106,7 +71,6 @@ class LeanstarAngleConverter {
    */
   calibrateExtension180Degrees(currentVoltage = this.lastFilteredVoltage) {
     this.voltageStraight180Deg = currentVoltage;
-    this.saveCalibration();
     console.info(`[CALIBRAÇÃO LEANSTAR] Braço estendido (180°) salvo em: ${currentVoltage.toFixed(3)} V`);
     return this.voltageStraight180Deg;
   }
@@ -122,7 +86,6 @@ class LeanstarAngleConverter {
       return this.voltageBent45Deg;
     }
     this.voltageBent45Deg = currentVoltage;
-    this.saveCalibration();
     console.info(`[CALIBRAÇÃO LEANSTAR] Braço flexionado (45°) salvo em: ${currentVoltage.toFixed(3)} V`);
     return this.voltageBent45Deg;
   }
