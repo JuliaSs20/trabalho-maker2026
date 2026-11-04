@@ -588,7 +588,9 @@ document.addEventListener('DOMContentLoaded', () => {
         drawAngleBadge(canvasCtx, p25, `${Math.round(data.angulosAtuais.principalDeg)}°`, statusColor, "Flexão Joelho");
       } else if (exKey === "shoulder_abduction" && p11) {
         drawAngleBadge(canvasCtx, p11, `${Math.round(data.angulosAtuais.principalDeg)}°`, statusColor, "Abdução Ombro");
-      } else if ((exKey === "biceps_curl" || exKey === "triceps_extension") && p13) {
+      } else if (exKey === "biceps_curl" && p14) {
+        drawAngleBadge(canvasCtx, p14, `${Math.round(data.angulosAtuais.principalDeg)}°`, statusColor, "Flexão Cotovelo Direito");
+      } else if (exKey === "triceps_extension" && p13) {
         drawAngleBadge(canvasCtx, p13, `${Math.round(data.angulosAtuais.principalDeg)}°`, statusColor, "Flexão Cotovelo");
       }
     }

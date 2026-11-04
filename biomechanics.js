@@ -550,18 +550,15 @@ const ExerciseLibrary = {
     unit: "deg",
     targetRange: "35.0° a 50.0°",
     evaluate: (landmarks, engineState) => {
-      const leftShoulder = landmarks[11];
       const rightShoulder = landmarks[12];
-      const leftElbow = landmarks[13];
       const rightElbow = landmarks[14];
-      const leftWrist = landmarks[15];
       const rightWrist = landmarks[16];
 
-      const leftElbowAngle = BiomechanicalEngine.calculateElbowFlexion(leftShoulder, leftElbow, leftWrist);
+      // O sensor fica no braço direito; use apenas esse lado para o ângulo e as repetições.
       const rightElbowAngle = BiomechanicalEngine.calculateElbowFlexion(rightShoulder, rightElbow, rightWrist);
-      const mainAngle = Math.min(leftElbowAngle, rightElbowAngle);
+      const mainAngle = rightElbowAngle;
 
-      const elbowDisplacement = Math.abs(leftElbow.x - leftShoulder.x);
+      const elbowDisplacement = Math.abs(rightElbow.x - rightShoulder.x);
       const cotoveloProjetado = elbowDisplacement > 0.12;
 
       let phase = engineState.currentState;
