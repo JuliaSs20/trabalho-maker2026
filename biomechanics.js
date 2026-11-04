@@ -560,6 +560,7 @@ const ExerciseLibrary = {
 
       const elbowDisplacement = Math.abs(rightElbow.x - rightShoulder.x);
       const cotoveloProjetado = elbowDisplacement > 0.12;
+      const cotoveloNaFlexaoAlvo = Math.abs(mainAngle - 45.0) <= 5.0;
       const cotoveloTotalmenteEstendido = mainAngle >= 165.0;
 
       let phase = engineState.currentState;
@@ -585,13 +586,17 @@ const ExerciseLibrary = {
       let feedback = "Movimento limpo! Contraia o bíceps no topo.";
       let rgb = [0, 255, 0];
 
-      if (cotoveloTotalmenteEstendido) {
+      if (cotoveloNaFlexaoAlvo) {
+        status = "EXCELENTE";
+        feedback = "✅ Flexão próxima de 45°. Boa contração do bíceps!";
+        rgb = [0, 255, 0];
+      } else if (cotoveloTotalmenteEstendido) {
         status = "ATENÇÃO";
         feedback = "⚠️ O cotovelo está quase totalmente estendido. Flexione um pouco mais o braço.";
         rgb = [255, 165, 0];
       }
 
-      if (cotoveloProjetado) {
+      if (cotoveloProjetado && !cotoveloNaFlexaoAlvo) {
         status = "ATENÇÃO";
         feedback = cotoveloTotalmenteEstendido
           ? "⚠️ Flexione um pouco o cotovelo e mantenha-o ao lado do tronco."
@@ -608,7 +613,7 @@ const ExerciseLibrary = {
         status,
         feedback,
         rgb,
-        faults: { cotoveloProjetado, cotoveloTotalmenteEstendido }
+        faults: { cotoveloProjetado, cotoveloTotalmenteEstendido, cotoveloNaFlexaoAlvo }
       };
     }
   },
