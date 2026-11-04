@@ -78,12 +78,24 @@ document.addEventListener('DOMContentLoaded', () => {
   let sessionUsedBleSensor = false;
   let bleReadingWatchdogTimer = null;
   let latestSensorReading = null;
+  let sensorDisplayMinAngle = Infinity;
+  let sensorDisplayMaxAngle = -Infinity;
   let latestSensorUiData = null;
   let sensorUiUpdateTimer = null;
   let lastBleStatusUpdateAt = 0;
   let lastFeedbackIconState = null;
   let latestCameraCorrection = null;
   let latestCameraFeedback = "";
+
+  // Reescala somente os valores apresentados na interface para 0°–45°.
+  // A análise biomecânica continua usando o ângulo original do sensor.
+  function mapSensorAngleForDisplay(angleDeg) {
+    sensorDisplayMinAngle = Math.min(sensorDisplayMinAngle, angleDeg);
+    sensorDisplayMaxAngle = Math.max(sensorDisplayMaxAngle, angleDeg);
+    const observedRange = sensorDisplayMaxAngle - sensorDisplayMinAngle;
+    if (observedRange === 0) return 0;
+    return ((angleDeg - sensorDisplayMinAngle) / observedRange) * 45;
+  }
 
   // Estado do Motor MediaPipe Pose & Conexão de Mídia
   let poseEngine = null;
@@ -869,10 +881,14 @@ document.addEventListener('DOMContentLoaded', () => {
       ? Number(data.sensorTelemetry.angleDeg)
       : Number(data.angulosAtuais.principalDeg);
     if (!Number.isFinite(angleDeg) || angleDeg < 0 || angleDeg > 180) return;
-    if (isSensorEvaluation) data.angulosAtuais.principalDeg = angleDeg;
+    const displayedAngleDeg = isSensorEvaluation
+      ? Number(data.sensorTelemetry.displayAngleDeg)
+      : angleDeg;
+    if (!Number.isFinite(displayedAngleDeg)) return;
+    if (isSensorEvaluation) data.angulosAtuais.principalDeg = displayedAngleDeg;
 
     hudPhaseText.textContent = data.faseMovimento ? data.faseMovimento.toUpperCase() : "NEUTRO";
-    hudKneeAngle.textContent = `${angleDeg.toFixed(0)}°`;
+    hudKneeAngle.textContent = `${displayedAngleDeg.toFixed(0)}°`;
     if (hudAngleSub) hudAngleSub.textContent = data.targetJointName || "Ângulo Alvo";
 
     // Regulador de Distância
@@ -892,21 +908,19 @@ document.addEventListener('DOMContentLoaded', () => {
       ? Boolean(rangeMatch && angleDeg >= Number(rangeMatch[1]) && angleDeg <= Number(rangeMatch[2]) &&
           (bicepsFlexedTarget || latestCameraCorrection !== true))
       : data.qualidadeExecucao.status === 'EXCELENTE');
-    const sensorDisplayValue = isSensorEvaluation && Number.isInteger(data.sensorTelemetry.integerValue)
-      ? String(data.sensorTelemetry.integerValue)
-      : angleDeg.toFixed(1);
+    const sensorDisplayValue = displayedAngleDeg.toFixed(1);
     const needsCorrection = !isWithinTarget;
     const status = isWithinTarget ? 'EXCELENTE' : 'ATENÇÃO';
     const msg = isSensorEvaluation
       ? isWithinTarget
         ? bicepsFlexedTarget
           ? "Flexão próxima de 45°. Boa contração do bíceps!"
-          : `Ângulo do sensor dentro da faixa-alvo (${data.targetRange}).`
+          : `Leitura exibida: ${displayedAngleDeg.toFixed(1)}°.`
         : bicepsFullyExtended
-          ? `Flexione um pouco o cotovelo. Leitura do sensor: ${angleDeg.toFixed(1)}°.`
+          ? `Flexione um pouco o cotovelo. Leitura exibida: ${displayedAngleDeg.toFixed(1)}°.`
           : latestCameraCorrection && latestCameraFeedback
             ? latestCameraFeedback
-            : `Ajuste o movimento. Ângulo do sensor: ${angleDeg.toFixed(1)}°. Alvo: ${data.targetRange}.`
+            : `Ajuste o movimento. Leitura exibida: ${displayedAngleDeg.toFixed(1)}°.`
       : data.qualidadeExecucao.mensagemFeedback;
 
     if (isSensorEvaluation) {
@@ -934,9 +948,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     valKneeAngle.textContent = `${sensorDisplayValue}°`;
     if (targetKneeAngle && data.targetRange) {
-      targetKneeAngle.textContent = `Alvo: ${data.targetRange}`;
+      targetKneeAngle.textContent = isSensorEvaluation
+        ? "Escala exibida: 0° a 45°"
+        : `Alvo: ${data.targetRange}`;
     }
-    const mainPct = Math.min(100, Math.max(0, (angleDeg / 180) * 100));
+    const mainPct = Math.min(100, Math.max(0, (displayedAngleDeg / 45) * 100));
     barKneeFlexion.style.width = `${mainPct}%`;
 
     valTrunkAngle.textContent = `${data.angulosAtuais.secundarioDeg.toFixed(1)}°`;
@@ -969,17 +985,16 @@ document.addEventListener('DOMContentLoaded', () => {
         bleReadingWatchdogTimer = null;
       }
       sessionUsedBleSensor = true;
+      const displayAngleDeg = mapSensorAngleForDisplay(sensorAngle);
       latestSensorReading = { ...reading, angleDeg: sensorAngle };
       const data = analyzer.processSensorAngle(sensorAngle);
-      data.sensorTelemetry = { ...reading, angleDeg: sensorAngle };
+      data.sensorTelemetry = { ...reading, angleDeg: sensorAngle, displayAngleDeg };
       // BLE devices can notify many times per second. Keep every sample for
       // motion counting, but coalesce expensive DOM/JSON updates to ~10 Hz.
       latestSensorUiData = data;
       const now = performance.now();
       if (now - lastBleStatusUpdateAt >= 500) {
-        const sensorAngleLabel = Number.isInteger(reading.integerValue)
-          ? `${reading.integerValue}°`
-          : `${sensorAngle.toFixed(1)}°`;
+        const sensorAngleLabel = `${displayAngleDeg.toFixed(1)}°`;
         const liveReadingLabel = Number.isFinite(reading.rawPercent)
           ? `${reading.rawPercent.toFixed(0)}% → ${sensorAngleLabel}`
           : sensorAngleLabel;
@@ -997,6 +1012,8 @@ document.addEventListener('DOMContentLoaded', () => {
       if (connected) {
         sessionUsedBleSensor = true;
         latestSensorReading = null;
+        sensorDisplayMinAngle = Infinity;
+        sensorDisplayMaxAngle = -Infinity;
         latestCameraCorrection = null;
         latestCameraFeedback = "";
         updateBleCameraPreviewLayer();
