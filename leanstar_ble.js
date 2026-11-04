@@ -61,7 +61,7 @@ class LeanstarAngleConverter {
     this.voltageStraight180Deg = 2.150; // Braço estendido (180°)
     // A tensão de referência corresponde ao limite de flexão configurado em 45°.
     this.voltageBent45Deg = 1.687; // Braço flexionado (45°)
-    this.filter = new LeanstarSignalFilter(2, 0.65);
+    this.filter = new LeanstarSignalFilter(1, 0.85);
     this.lastFilteredVoltage = 2.150;
   }
 
