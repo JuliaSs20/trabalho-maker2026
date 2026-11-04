@@ -350,9 +350,9 @@ class LeanstarBLEManager {
     const text = value.trim().replace(',', '.');
     if (!text) return;
 
-    // The Arduino sketch sends flexion progress as "C:XX" (0–100%).
-    // Keep accepting the older "Cotovelo:XX" format too.
-    const elbowIntegerMatch = text.match(/^(?:C|Cotovelo)\s*:\s*(\d+)$/i);
+    // The Arduino sketch sends flexion progress as "Cotovelo:XX" (0–100%).
+    // Also accept "C:XX" for compatibility with the previous firmware version.
+    const elbowIntegerMatch = text.match(/^(?:Cotovelo|C)\s*:\s*(\d+)$/i);
     if (elbowIntegerMatch) {
       const rawPercent = Number.parseInt(elbowIntegerMatch[1], 10);
       if (rawPercent < 0 || rawPercent > 100) {
