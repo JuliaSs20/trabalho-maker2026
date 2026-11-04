@@ -79,8 +79,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Estado do Motor MediaPipe Pose & Conexão de Mídia
   let poseEngine = null;
+  let poseScriptPromise = null;
   let mediaStream = null;
   let isSendingFrame = false;
+  let isStartingWebcam = false;
   let simTime = 0;
 
   const synth = window.speechSynthesis;
@@ -131,14 +133,33 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function initPoseEngine() {
+  async function initPoseEngine() {
     if (poseEngine) return true;
-    if (typeof window.Pose === 'undefined') {
-      console.error("SDK do MediaPipe Pose não encontrado no window.");
-      return false;
-    }
 
     try {
+      if (typeof window.Pose === 'undefined') {
+        if (!poseScriptPromise) {
+          poseScriptPromise = new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = "https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js";
+            script.crossOrigin = "anonymous";
+            script.async = true;
+            script.onload = resolve;
+            script.onerror = () => {
+              poseScriptPromise = null;
+              reject(new Error("Não foi possível baixar a biblioteca MediaPipe Pose."));
+            };
+            document.head.appendChild(script);
+          });
+        }
+        await poseScriptPromise;
+      }
+
+      if (poseEngine) return true;
+      if (typeof window.Pose === 'undefined') {
+        throw new Error("SDK do MediaPipe Pose não encontrado no window.");
+      }
+
       poseEngine = new window.Pose({
         locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
       });
@@ -156,6 +177,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return true;
     } catch (err) {
       console.error("Erro ao inicializar MediaPipe Pose:", err);
+      poseScriptPromise = null;
       return false;
     }
   }
@@ -212,23 +234,15 @@ document.addEventListener('DOMContentLoaded', () => {
   /**
    * DETECÇÃO E LISTAGEM DE CÂMERAS PRESENTES NO DISPOSITIVO
    */
-  async function detectAvailableCameras() {
+  async function detectAvailableCameras(updateStatus = true) {
     if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
-      alert("Seu navegador não suporta detecção de dispositivos de mídia.");
+      if (updateStatus) alert("Seu navegador não suporta detecção de dispositivos de mídia.");
       return [];
     }
 
     try {
-      updateStatusText("Buscando Câmeras...", "yellow");
+      if (updateStatus) updateStatusText("Buscando Câmeras...", "yellow");
       
-      // Solicita permissão temporária para revelar os nomes/labels das câmeras caso estejam vazias
-      try {
-        const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
-        tempStream.getTracks().forEach(t => t.stop());
-      } catch (e) {
-        console.warn("Permissão de câmera não concedida previamente:", e);
-      }
-
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoDevices = devices.filter(device => device.kind === 'videoinput');
 
@@ -241,8 +255,10 @@ document.addEventListener('DOMContentLoaded', () => {
           opt.textContent = "❌ Nenhuma Câmera Encontrada";
           cameraDeviceSelect.appendChild(opt);
           cameraDeviceSelect.classList.remove('hidden');
-          showCameraError("Nenhuma câmera física ou virtual foi localizada no seu computador.");
-          updateStatusText("Nenhuma Câmera", "red");
+          if (updateStatus) {
+            showCameraError("Nenhuma câmera física ou virtual foi localizada no seu computador.");
+            updateStatusText("Nenhuma Câmera", "red");
+          }
         } else {
           videoDevices.forEach((device, index) => {
             const opt = document.createElement('option');
@@ -252,7 +268,7 @@ document.addEventListener('DOMContentLoaded', () => {
           });
 
           cameraDeviceSelect.classList.remove('hidden');
-          updateStatusText(`${videoDevices.length} Câmera(s) Localizada(s)`, "green");
+          if (updateStatus) updateStatusText(`${videoDevices.length} Câmera(s) Localizada(s)`, "green");
         }
       }
 
@@ -265,22 +281,18 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function startWebcamStream(targetDeviceId = null) {
+    if (isStartingWebcam) return;
+    isStartingWebcam = true;
     stopMediaStream();
     hideCameraError();
     updateStatusText("Conectando Câmera...", "yellow");
-
-    if (!initPoseEngine()) {
-      showCameraError("Não foi possível carregar a biblioteca MediaPipe Pose.");
-      updateStatusText("Erro no Motor AI", "red");
-      return;
-    }
 
     try {
       const selectedDeviceId = targetDeviceId || (cameraDeviceSelect ? cameraDeviceSelect.value : null);
       
       const videoConstraints = selectedDeviceId && selectedDeviceId !== ""
-        ? { deviceId: { exact: selectedDeviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
-        : { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } };
+        ? { deviceId: { exact: selectedDeviceId }, width: { ideal: 640 }, height: { ideal: 480 } }
+        : { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } };
 
       const stream = await navigator.mediaDevices.getUserMedia({
         video: videoConstraints,
@@ -290,10 +302,32 @@ document.addEventListener('DOMContentLoaded', () => {
       mediaStream = stream;
       videoElement.srcObject = stream;
       await videoElement.play();
+      if (videoElement.readyState < 2) {
+        await new Promise((resolve) => videoElement.addEventListener('loadeddata', resolve, { once: true }));
+      }
 
-      // Atualiza lista de câmeras caso ainda não populada
+      // Mostra o preview imediatamente, sem esperar o primeiro processamento do MediaPipe.
+      resizeCanvas();
+      canvasCtx.save();
+      if (sourceSelect.value === 'webcam') {
+        canvasCtx.translate(canvasElement.width, 0);
+        canvasCtx.scale(-1, 1);
+      }
+      canvasCtx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+      canvasCtx.restore();
+      updateStatusText("Câmera aberta; iniciando análise...", "yellow");
+
+      // A captura começa antes da inicialização da análise para reduzir a espera percebida.
+      if (!await initPoseEngine()) {
+        stopMediaStream();
+        showCameraError("Não foi possível carregar a biblioteca MediaPipe Pose.");
+        updateStatusText("Erro no Motor AI", "red");
+        return;
+      }
+
+      // Atualiza os nomes depois que a permissão já revelou os rótulos, sem reabrir a câmera.
       if (cameraDeviceSelect && cameraDeviceSelect.children.length <= 1) {
-        detectAvailableCameras();
+        void detectAvailableCameras(false);
       }
 
       updateStatusText("Câmera Conectada (30 FPS)", "green");
@@ -302,15 +336,17 @@ document.addEventListener('DOMContentLoaded', () => {
       console.error("Erro ao iniciar webcam:", err);
       showCameraError(err.message || "Erro de acesso à câmera selecionada.");
       updateStatusText("Câmera Desconectada", "red");
+    } finally {
+      isStartingWebcam = false;
     }
   }
 
-  function handleVideoFile(file) {
+  async function handleVideoFile(file) {
     stopMediaStream();
     hideCameraError();
     if (!file) return;
 
-    if (!initPoseEngine()) {
+    if (!await initPoseEngine()) {
       showCameraError("Erro ao inicializar biblioteca de Visão Computacional.");
       return;
     }
@@ -318,7 +354,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const url = URL.createObjectURL(file);
     videoElement.src = url;
     videoElement.loop = true;
-    videoElement.play();
+    await videoElement.play();
     updateStatusText(`Vídeo: ${file.name}`, "green");
     if (!isRunning) btnStart.click();
   }
@@ -1055,7 +1091,6 @@ document.addEventListener('DOMContentLoaded', () => {
       if (cameraDeviceSelect) cameraDeviceSelect.classList.add('hidden');
       updateStatusText("Motor Conectado (30 FPS)", "green");
     } else if (val === 'webcam') {
-      await detectAvailableCameras();
       await startWebcamStream();
     } else if (val === 'video') {
       stopMediaStream();
@@ -1066,14 +1101,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   videoFileInput.addEventListener('change', (e) => {
     if (e.target.files && e.target.files[0]) {
-      handleVideoFile(e.target.files[0]);
+      void handleVideoFile(e.target.files[0]).catch((err) => {
+        console.error("Erro ao abrir o vídeo:", err);
+        showCameraError(err.message || "Não foi possível reproduzir o vídeo selecionado.");
+      });
     }
   });
 
   if (btnRetryCamera) {
     btnRetryCamera.addEventListener('click', async () => {
       if (sourceSelect.value === 'webcam') {
-        await detectAvailableCameras();
         await startWebcamStream();
       }
     });
