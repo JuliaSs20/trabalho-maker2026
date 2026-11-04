@@ -78,6 +78,10 @@ document.addEventListener('DOMContentLoaded', () => {
   let sessionUsedBleSensor = false;
   let bleReadingWatchdogTimer = null;
   let latestSensorReading = null;
+  let latestSensorUiData = null;
+  let sensorUiUpdateTimer = null;
+  let lastBleStatusUpdateAt = 0;
+  let lastFeedbackIconState = null;
   let latestCameraCorrection = null;
   let latestCameraFeedback = "";
 
@@ -111,8 +115,12 @@ document.addEventListener('DOMContentLoaded', () => {
   function resizeCanvas() {
     const wrapper = document.getElementById('canvas-wrapper');
     if (wrapper) {
-      canvasElement.width = wrapper.clientWidth || 640;
-      canvasElement.height = wrapper.clientHeight || 480;
+      const width = wrapper.clientWidth || 640;
+      const height = wrapper.clientHeight || 480;
+      // Changing canvas dimensions clears and reallocates its backing buffer.
+      // Avoid doing that on every camera result when the layout did not change.
+      if (canvasElement.width !== width) canvasElement.width = width;
+      if (canvasElement.height !== height) canvasElement.height = height;
     }
   }
   window.addEventListener('resize', resizeCanvas);
@@ -900,9 +908,11 @@ document.addEventListener('DOMContentLoaded', () => {
     patientFeedbackCard.className = `patient-feedback-card status-${status === 'EXCELENTE' ? 'good' : (status === 'ATENÇÃO' ? 'warning' : 'danger')}`;
     feedbackTag.textContent = needsCorrection ? 'CORREÇÃO NECESSÁRIA' : (isSensorEvaluation ? 'AVALIAÇÃO DE AMPLITUDE' : 'EXCELENTE POSTURA');
     feedbackMainMsg.textContent = msg;
-    if (feedbackIconContainer) {
+    const feedbackIconState = needsCorrection ? 'correction' : 'good';
+    if (feedbackIconContainer && feedbackIconState !== lastFeedbackIconState) {
       feedbackIconContainer.innerHTML = `<i data-lucide="${needsCorrection ? 'alert-triangle' : 'check-circle-2'}"></i>`;
       if (window.lucide) lucide.createIcons({ root: feedbackIconContainer });
+      lastFeedbackIconState = feedbackIconState;
     }
 
     if (needsCorrection) {
@@ -951,18 +961,28 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       sessionUsedBleSensor = true;
       latestSensorReading = { ...reading, angleDeg: sensorAngle };
-      const sensorAngleLabel = Number.isInteger(reading.integerValue)
-        ? `${reading.integerValue}°`
-        : `${sensorAngle.toFixed(1)}°`;
-      // Render the physical reading directly; updatePatientUI then applies the target-range alert.
-      valKneeAngle.textContent = sensorAngleLabel;
-      const liveReadingLabel = Number.isFinite(reading.rawPercent)
-        ? `${reading.rawPercent.toFixed(0)}% → ${sensorAngleLabel}`
-        : sensorAngleLabel;
-      updateStatusText(`Sensor BLE recebendo: ${liveReadingLabel}`, "green");
       const data = analyzer.processSensorAngle(sensorAngle);
       data.sensorTelemetry = { ...reading, angleDeg: sensorAngle };
-      updatePatientUI(data);
+      // BLE devices can notify many times per second. Keep every sample for
+      // motion counting, but coalesce expensive DOM/JSON updates to ~10 Hz.
+      latestSensorUiData = data;
+      const now = performance.now();
+      if (now - lastBleStatusUpdateAt >= 500) {
+        const sensorAngleLabel = Number.isInteger(reading.integerValue)
+          ? `${reading.integerValue}°`
+          : `${sensorAngle.toFixed(1)}°`;
+        const liveReadingLabel = Number.isFinite(reading.rawPercent)
+          ? `${reading.rawPercent.toFixed(0)}% → ${sensorAngleLabel}`
+          : sensorAngleLabel;
+        updateStatusText(`Sensor BLE recebendo: ${liveReadingLabel}`, "green");
+        lastBleStatusUpdateAt = now;
+      }
+      if (sensorUiUpdateTimer === null) {
+        sensorUiUpdateTimer = window.setTimeout(() => {
+          sensorUiUpdateTimer = null;
+          if (latestSensorUiData) updatePatientUI(latestSensorUiData);
+        }, 100);
+      }
     },
     (connected, deviceName, reconnecting = false) => {
       if (connected) {
@@ -1030,7 +1050,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!poseEngine || isSendingFrame || !videoElement || videoElement.readyState < 2 ||
         videoElement.paused || videoElement.ended) return;
     const now = performance.now();
-    const minIntervalMs = bleSensor.isConnected ? 150 : 0;
+    // BLE notifications and pose inference both use the main thread. Keep the
+    // camera preview independent and sample fewer frames while the sensor streams.
+    const minIntervalMs = bleSensor.isConnected ? 250 : 0;
     if (now - lastPoseFrameSentAt < minIntervalMs) return;
 
     isSendingFrame = true;
