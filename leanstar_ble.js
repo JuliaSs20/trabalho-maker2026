@@ -155,9 +155,9 @@ class LeanstarBLEManager {
     this.decoder = new TextDecoder('utf-8');
     this.angleConverter = new LeanstarAngleConverter();
     // The Arduino sketch sends 0% at extension and 100% at flexion.
-    // Map that range to the elbow's expected 180°-to-45° interior angle.
+    // Map that range to the elbow's expected 180°-to-90° interior angle.
     this.extendedAngleDeg = 180;
-    this.flexedAngleDeg = 45;
+    this.flexedAngleDeg = 90;
   }
 
   /**
