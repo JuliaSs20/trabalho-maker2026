@@ -59,15 +59,15 @@ class LeanstarAngleConverter {
   constructor() {
     // Valores padrão iniciais (Volts) caso o paciente ainda não tenha calibrado
     this.voltageStraight180Deg = 2.150; // Braço estendido (180°)
-    // Calibrado para a tensão que antes aparecia como aproximadamente 46,3°.
-    this.voltageBent90Deg = 1.687; // Braço dobrado (90°)
+    // A tensão de referência corresponde ao limite de flexão configurado em 45°.
+    this.voltageBent45Deg = 1.687; // Braço flexionado (45°)
     this.filter = new LeanstarSignalFilter(6, 0.22);
     this.lastFilteredVoltage = 2.150;
   }
 
   /**
    * Calibra o ponto de extensão total (braço estendido = 180°)
-   * @param {number} currentVoltage Voltagem lida no momento da extensão
+   * @param {number} currentVoltage Tensão lida com o braço estendido a 180°
    */
   calibrateExtension180Degrees(currentVoltage = this.lastFilteredVoltage) {
     this.voltageStraight180Deg = currentVoltage;
@@ -76,18 +76,18 @@ class LeanstarAngleConverter {
   }
 
   /**
-   * Calibra o ponto de flexão de referência (Membro dobrado = 90°)
-   * @param {number} currentVoltage Voltagem lida no momento da flexão a 90°
+   * Calibra o ponto de flexão de referência (braço flexionado = 45°)
+   * @param {number} currentVoltage Tensão lida com o braço flexionado a 45°
    */
-  calibrateNinetyDegrees(currentVoltage = this.lastFilteredVoltage) {
+  calibrateFlexed45Degrees(currentVoltage = this.lastFilteredVoltage) {
     // Evita divisão por zero caso o usuário clique nos dois botões na mesma posição
     if (Math.abs(currentVoltage - this.voltageStraight180Deg) < 0.02) {
-      console.warn("[CALIBRAÇÃO LEANSTAR] A variação de tensão entre 0° e 90° é muito pequena! Dobre mais a fita.");
-      return this.voltageBent90Deg;
+      console.warn("[CALIBRAÇÃO LEANSTAR] A variação de tensão entre 180° e 45° é muito pequena! Dobre mais a fita.");
+      return this.voltageBent45Deg;
     }
-    this.voltageBent90Deg = currentVoltage;
-    console.info(`[CALIBRAÇÃO LEANSTAR] Ponto 90° (Dobrado) salvo em: ${currentVoltage.toFixed(3)} V`);
-    return this.voltageBent90Deg;
+    this.voltageBent45Deg = currentVoltage;
+    console.info(`[CALIBRAÇÃO LEANSTAR] Braço flexionado (45°) salvo em: ${currentVoltage.toFixed(3)} V`);
+    return this.voltageBent45Deg;
   }
 
   /**
@@ -99,15 +99,15 @@ class LeanstarAngleConverter {
     const cleanVoltage = this.filter.process(rawVoltage);
     this.lastFilteredVoltage = cleanVoltage;
 
-    // 2. Interpolação entre braço estendido (180°) e dobrado (90°).
-    const deltaVCalib = this.voltageBent90Deg - this.voltageStraight180Deg;
+    // 2. Interpolação entre braço estendido (180°) e flexionado (45°).
+    const deltaVCalib = this.voltageBent45Deg - this.voltageStraight180Deg;
     if (Math.abs(deltaVCalib) < 0.001) return NaN;
 
     const flexionProgress = (cleanVoltage - this.voltageStraight180Deg) / deltaVCalib;
-    let angleDeg = 180.0 - (flexionProgress * 90.0);
+    let angleDeg = 180.0 - (flexionProgress * 135.0);
 
-    // 3. Limita a leitura ao intervalo esperado: 90° dobrado a 180° estendido.
-    angleDeg = Math.max(90.0, Math.min(180.0, angleDeg));
+    // 3. Limita a leitura ao intervalo esperado: 45° flexionado a 180° estendido.
+    angleDeg = Math.max(45.0, Math.min(180.0, angleDeg));
 
     return parseFloat(angleDeg.toFixed(1));
   }
@@ -156,9 +156,9 @@ class LeanstarBLEManager {
     this.decoder = new TextDecoder('utf-8');
     this.angleConverter = new LeanstarAngleConverter();
     // The Arduino sketch sends 0% at extension and 100% at flexion.
-    // Map that range to the elbow's expected 180°-to-90° interior angle.
+    // Map that range to the elbow's expected 180°-to-45° interior angle.
     this.extendedAngleDeg = 180;
-    this.flexedAngleDeg = 90;
+    this.flexedAngleDeg = 45;
   }
 
   /**

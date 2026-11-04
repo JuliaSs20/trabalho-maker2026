@@ -5,6 +5,7 @@
 document.addEventListener('DOMContentLoaded', () => {
   // Inicialização do Motor Biomecânico Unificado
   const analyzer = new TherapeuticExerciseAnalyzer("squat");
+  const cameraOverlayAnalyzer = new TherapeuticExerciseAnalyzer("squat");
   
   // Elementos do DOM - Captação & Canvas
   const videoElement = document.getElementById('input-video');
@@ -76,6 +77,9 @@ document.addEventListener('DOMContentLoaded', () => {
   let sessionLogs = [];
   let sessionUsedBleSensor = false;
   let bleReadingWatchdogTimer = null;
+  let latestSensorReading = null;
+  let latestCameraCorrection = null;
+  let latestCameraFeedback = "";
 
   // Estado do Motor MediaPipe Pose & Conexão de Mídia
   let poseEngine = null;
@@ -203,14 +207,51 @@ document.addEventListener('DOMContentLoaded', () => {
       canvasCtx.restore();
     }
 
-    // Preserve live video while BLE owns the angle and feedback UI.
-    if (bleSensor.isConnected) return;
-
     if (results.poseLandmarks && results.poseLandmarks.length >= 33) {
-      const processedData = analyzer.processFrame(results.poseLandmarks, useFilter);
+      const usingBle = bleSensor.isConnected;
+      const frameAnalyzer = usingBle ? cameraOverlayAnalyzer : analyzer;
+      if (usingBle && cameraOverlayAnalyzer.currentExerciseKey !== analyzer.currentExerciseKey) {
+        cameraOverlayAnalyzer.setExercise(analyzer.currentExerciseKey);
+      }
+      const processedData = frameAnalyzer.processFrame(results.poseLandmarks, useFilter);
+
+      if (usingBle) {
+        latestCameraCorrection = processedData.qualidadeExecucao.status !== "EXCELENTE";
+        latestCameraFeedback = processedData.qualidadeExecucao.mensagemFeedback || "";
+        const sensorAngle = Number(latestSensorReading && latestSensorReading.angleDeg);
+        const syncedAngle = Number.isFinite(sensorAngle) ? sensorAngle : processedData.angulosAtuais.principalDeg;
+        const angleRange = String(processedData.targetRange || "").match(/([\d.]+)°\s*a\s*([\d.]+)°/);
+        const sensorOutsideRange = Number.isFinite(sensorAngle) && angleRange &&
+          (sensorAngle < Number(angleRange[1]) || sensorAngle > Number(angleRange[2]));
+        const fullyExtended = processedData.exerciseKey === "biceps_curl" && Number.isFinite(sensorAngle) && sensorAngle >= 165;
+        const needsCorrection = Boolean(sensorOutsideRange || fullyExtended || latestCameraCorrection);
+        const overlayData = {
+          ...processedData,
+          angulosAtuais: { ...processedData.angulosAtuais, principalDeg: syncedAngle },
+          qualidadeExecucao: {
+            ...processedData.qualidadeExecucao,
+            status: needsCorrection ? "ATENÇÃO" : "EXCELENTE",
+            mensagemFeedback: fullyExtended
+              ? "Flexione um pouco o cotovelo; a leitura do sensor está sincronizada com o braço direito."
+              : latestCameraCorrection
+                ? latestCameraFeedback
+                : sensorOutsideRange
+                  ? `Ângulo do sensor fora da faixa ${processedData.targetRange}.`
+                  : "Movimento dentro da faixa; leitura sincronizada com o sensor BLE."
+          }
+        };
+        renderBiomechanicalOverlay(processedData.landmarksProcessed, overlayData, sourceMode === 'webcam');
+        return;
+      }
+
       renderBiomechanicalOverlay(processedData.landmarksProcessed, processedData, sourceMode === 'webcam');
       updatePatientUI(processedData);
     } else if (sourceMode === 'webcam' || sourceMode === 'video') {
+      if (bleSensor.isConnected) {
+        latestCameraCorrection = true;
+        latestCameraFeedback = "Mostre o braço direito à câmera para sincronizar a animação com o sensor.";
+        return;
+      }
       hudPhaseText.textContent = "POSICIONE-SE EM FRENTE À CÂMERA";
       hudKneeAngle.textContent = "--°";
       jsonStreamOutput.textContent = analyzer.formatJSONProtocol(null, sourceMode === 'webcam' ? "Câmera BioPhysio IoT - Vista Frontal ao Vivo" : "Câmera BioPhysio IoT - Arquivo de Vídeo");
@@ -829,8 +870,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const rangeMatch = String(data.targetRange || "").match(/([\d.]+)°\s*a\s*([\d.]+)°/);
+    const bicepsFullyExtended = data.exerciseKey === "biceps_curl" && angleDeg >= 165;
     const isWithinTarget = isSensorEvaluation
-      ? Boolean(rangeMatch && angleDeg >= Number(rangeMatch[1]) && angleDeg <= Number(rangeMatch[2]))
+      ? Boolean(rangeMatch && angleDeg >= Number(rangeMatch[1]) && angleDeg <= Number(rangeMatch[2]) &&
+          !bicepsFullyExtended && latestCameraCorrection !== true)
       : data.qualidadeExecucao.status === 'EXCELENTE';
     const sensorDisplayValue = isSensorEvaluation && Number.isInteger(data.sensorTelemetry.integerValue)
       ? String(data.sensorTelemetry.integerValue)
@@ -840,8 +883,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const msg = isSensorEvaluation
       ? isWithinTarget
         ? `Ângulo do sensor dentro da faixa-alvo (${data.targetRange}).`
-        : `Ajuste o movimento. Ângulo do sensor: ${angleDeg.toFixed(1)}°. Alvo: ${data.targetRange}.`
+        : bicepsFullyExtended
+          ? `Flexione um pouco o cotovelo. Leitura do sensor: ${angleDeg.toFixed(1)}°.`
+          : latestCameraCorrection && latestCameraFeedback
+            ? latestCameraFeedback
+            : `Ajuste o movimento. Ângulo do sensor: ${angleDeg.toFixed(1)}°. Alvo: ${data.targetRange}.`
       : data.qualidadeExecucao.mensagemFeedback;
+
+    if (isSensorEvaluation) {
+      data.qualidadeExecucao.status = isWithinTarget ? 'EXCELENTE' : 'ATENÇÃO';
+      data.qualidadeExecucao.mensagemFeedback = msg;
+    }
 
     patientFeedbackCard.className = `patient-feedback-card status-${status === 'EXCELENTE' ? 'good' : (status === 'ATENÇÃO' ? 'warning' : 'danger')}`;
     feedbackTag.textContent = needsCorrection ? 'CORREÇÃO NECESSÁRIA' : (isSensorEvaluation ? 'AVALIAÇÃO DE AMPLITUDE' : 'EXCELENTE POSTURA');
@@ -851,13 +903,10 @@ document.addEventListener('DOMContentLoaded', () => {
       if (window.lucide) lucide.createIcons({ root: feedbackIconContainer });
     }
 
-    if (needsCorrection && !isSensorEvaluation) {
+    if (needsCorrection) {
       speakFeedback(msg);
       canvasWarningToast.classList.remove('hidden');
       canvasWarningMsg.textContent = msg;
-    } else if (needsCorrection && isSensorEvaluation) {
-      canvasWarningToast.classList.add('hidden');
-      speakFeedback(feedbackMainMsg.textContent);
     } else {
       canvasWarningToast.classList.add('hidden');
     }
@@ -899,6 +948,7 @@ document.addEventListener('DOMContentLoaded', () => {
         bleReadingWatchdogTimer = null;
       }
       sessionUsedBleSensor = true;
+      latestSensorReading = { ...reading, angleDeg: sensorAngle };
       const sensorAngleLabel = Number.isInteger(reading.integerValue)
         ? `${reading.integerValue}°`
         : `${sensorAngle.toFixed(1)}°`;
@@ -915,6 +965,9 @@ document.addEventListener('DOMContentLoaded', () => {
     (connected, deviceName, reconnecting = false) => {
       if (connected) {
         sessionUsedBleSensor = true;
+        latestSensorReading = null;
+        latestCameraCorrection = null;
+        latestCameraFeedback = "";
         patientFeedbackCard.className = "patient-feedback-card status-warning";
         feedbackTag.textContent = "AGUARDANDO LEITURA DO SENSOR";
         feedbackMainMsg.textContent = "Sensor conectado. Aguardando o primeiro ângulo do Arduino.";
@@ -932,6 +985,9 @@ document.addEventListener('DOMContentLoaded', () => {
           updateStatusText("Sensor conectado, aguardando dados do Arduino", "red");
         }, 2500);
       } else {
+        latestSensorReading = null;
+        latestCameraCorrection = null;
+        latestCameraFeedback = "";
         if (bleReadingWatchdogTimer !== null) {
           window.clearTimeout(bleReadingWatchdogTimer);
           bleReadingWatchdogTimer = null;
@@ -966,6 +1022,18 @@ document.addEventListener('DOMContentLoaded', () => {
   /**
    * LOOP PRINCIPAL DE PROCESSAMENTO
    */
+  function sendCurrentVideoFrameToPose() {
+    if (!poseEngine || isSendingFrame || !videoElement || videoElement.readyState < 2 ||
+        videoElement.paused || videoElement.ended) return;
+
+    isSendingFrame = true;
+    poseEngine.send({ image: videoElement })
+      .catch((err) => {
+        console.error("Erro no envio do frame para o MediaPipe:", err);
+      })
+      .finally(() => { isSendingFrame = false; });
+  }
+
   async function mainLoop() {
     if (!isRunning) return;
     if (bleSensor.isConnected) {
@@ -981,6 +1049,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         canvasCtx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
         canvasCtx.restore();
+        sendCurrentVideoFrameToPose();
       }
       animationFrameId = requestAnimationFrame(mainLoop);
       return;
@@ -997,16 +1066,7 @@ document.addEventListener('DOMContentLoaded', () => {
       renderBiomechanicalOverlay(processedData.landmarksProcessed, processedData, false);
       updatePatientUI(processedData);
     } else if (sourceMode === 'webcam' || sourceMode === 'video') {
-      if (videoElement && videoElement.readyState >= 2 && !videoElement.paused && !videoElement.ended) {
-        if (poseEngine && !isSendingFrame) {
-          isSendingFrame = true;
-          poseEngine.send({ image: videoElement })
-            .catch((err) => {
-            console.error("Erro no envio do frame para o MediaPipe:", err);
-            })
-            .finally(() => { isSendingFrame = false; });
-        }
-      }
+      sendCurrentVideoFrameToPose();
     }
 
     animationFrameId = requestAnimationFrame(mainLoop);
