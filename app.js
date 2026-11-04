@@ -140,14 +140,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function updateBleCameraPreviewLayer() {
     if (!videoElement) return;
-    const cameraSourceActive = sourceSelect.value === 'webcam' || sourceSelect.value === 'video';
-    const showDirectVideo = bleSensor.isConnected && cameraSourceActive;
-    videoElement.style.display = showDirectVideo ? 'block' : 'none';
-    videoElement.style.opacity = showDirectVideo ? '1' : '0.8';
-    videoElement.style.transform = sourceSelect.value === 'webcam' ? 'scaleX(-1)' : 'none';
-    if (showDirectVideo) {
-      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-    }
+    // Keep the camera active for pose tracking, but show only the animated skeleton.
+    videoElement.style.display = 'none';
+    videoElement.style.opacity = '0';
+    videoElement.style.transform = 'none';
+    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
   }
 
   async function initPoseEngine() {
@@ -203,24 +200,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!isRunning) return;
     resizeCanvas();
 
-    const width = canvasElement.width;
-    const height = canvasElement.height;
     const sourceMode = sourceSelect.value;
     const useFilter = chkNoiseFilter.checked;
 
-    canvasCtx.clearRect(0, 0, width, height);
+    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
 
     const usingBle = bleSensor.isConnected;
-    if (!usingBle && (sourceMode === 'webcam' || sourceMode === 'video') && results.image) {
-      canvasCtx.save();
-      if (sourceMode === 'webcam') {
-        canvasCtx.translate(width, 0);
-        canvasCtx.scale(-1, 1);
-      }
-      canvasCtx.drawImage(results.image, 0, 0, width, height);
-      canvasCtx.restore();
-    }
-
     if (results.poseLandmarks && results.poseLandmarks.length >= 33) {
       const frameAnalyzer = usingBle ? cameraOverlayAnalyzer : analyzer;
       if (usingBle && cameraOverlayAnalyzer.currentExerciseKey !== analyzer.currentExerciseKey) {
@@ -368,15 +353,9 @@ document.addEventListener('DOMContentLoaded', () => {
         await new Promise((resolve) => videoElement.addEventListener('loadeddata', resolve, { once: true }));
       }
 
-      // Mostra o preview imediatamente, sem esperar o primeiro processamento do MediaPipe.
+      // Mantém o vídeo oculto no painel; só a animação do rastreamento será exibida.
       resizeCanvas();
-      canvasCtx.save();
-      if (sourceSelect.value === 'webcam') {
-        canvasCtx.translate(canvasElement.width, 0);
-        canvasCtx.scale(-1, 1);
-      }
-      canvasCtx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
-      canvasCtx.restore();
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
       updateStatusText("Câmera aberta; iniciando análise...", "yellow");
 
       // A captura começa antes da inicialização da análise para reduzir a espera percebida.
