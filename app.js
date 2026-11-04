@@ -86,6 +86,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let poseScriptPromise = null;
   let mediaStream = null;
   let isSendingFrame = false;
+  let lastPoseFrameSentAt = 0;
   let isStartingWebcam = false;
   let simTime = 0;
 
@@ -134,6 +135,18 @@ document.addEventListener('DOMContentLoaded', () => {
     if (statusText) statusText.textContent = text;
     if (statusDot) {
       statusDot.className = `pulse-dot ${dotColor}`;
+    }
+  }
+
+  function updateBleCameraPreviewLayer() {
+    if (!videoElement) return;
+    const cameraSourceActive = sourceSelect.value === 'webcam' || sourceSelect.value === 'video';
+    const showDirectVideo = bleSensor.isConnected && cameraSourceActive;
+    videoElement.style.display = showDirectVideo ? 'block' : 'none';
+    videoElement.style.opacity = showDirectVideo ? '1' : '0.8';
+    videoElement.style.transform = sourceSelect.value === 'webcam' ? 'scaleX(-1)' : 'none';
+    if (showDirectVideo) {
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
     }
   }
 
@@ -197,7 +210,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     canvasCtx.clearRect(0, 0, width, height);
 
-    if ((sourceMode === 'webcam' || sourceMode === 'video') && results.image) {
+    const usingBle = bleSensor.isConnected;
+    if (!usingBle && (sourceMode === 'webcam' || sourceMode === 'video') && results.image) {
       canvasCtx.save();
       if (sourceMode === 'webcam') {
         canvasCtx.translate(width, 0);
@@ -208,7 +222,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (results.poseLandmarks && results.poseLandmarks.length >= 33) {
-      const usingBle = bleSensor.isConnected;
       const frameAnalyzer = usingBle ? cameraOverlayAnalyzer : analyzer;
       if (usingBle && cameraOverlayAnalyzer.currentExerciseKey !== analyzer.currentExerciseKey) {
         cameraOverlayAnalyzer.setExercise(analyzer.currentExerciseKey);
@@ -350,6 +363,7 @@ document.addEventListener('DOMContentLoaded', () => {
       mediaStream = stream;
       videoElement.srcObject = stream;
       await videoElement.play();
+      updateBleCameraPreviewLayer();
       if (videoElement.readyState < 2) {
         await new Promise((resolve) => videoElement.addEventListener('loadeddata', resolve, { once: true }));
       }
@@ -403,6 +417,7 @@ document.addEventListener('DOMContentLoaded', () => {
     videoElement.src = url;
     videoElement.loop = true;
     await videoElement.play();
+    updateBleCameraPreviewLayer();
     updateStatusText(`Vídeo: ${file.name}`, "green");
     if (!isRunning) btnStart.click();
   }
@@ -975,6 +990,7 @@ document.addEventListener('DOMContentLoaded', () => {
         latestSensorReading = null;
         latestCameraCorrection = null;
         latestCameraFeedback = "";
+        updateBleCameraPreviewLayer();
         patientFeedbackCard.className = "patient-feedback-card status-warning";
         feedbackTag.textContent = "AGUARDANDO LEITURA DO SENSOR";
         feedbackMainMsg.textContent = "Sensor conectado. Aguardando o primeiro ângulo do Arduino.";
@@ -995,6 +1011,7 @@ document.addEventListener('DOMContentLoaded', () => {
         latestSensorReading = null;
         latestCameraCorrection = null;
         latestCameraFeedback = "";
+        updateBleCameraPreviewLayer();
         if (bleReadingWatchdogTimer !== null) {
           window.clearTimeout(bleReadingWatchdogTimer);
           bleReadingWatchdogTimer = null;
@@ -1032,8 +1049,12 @@ document.addEventListener('DOMContentLoaded', () => {
   function sendCurrentVideoFrameToPose() {
     if (!poseEngine || isSendingFrame || !videoElement || videoElement.readyState < 2 ||
         videoElement.paused || videoElement.ended) return;
+    const now = performance.now();
+    const minIntervalMs = bleSensor.isConnected ? 150 : 0;
+    if (now - lastPoseFrameSentAt < minIntervalMs) return;
 
     isSendingFrame = true;
+    lastPoseFrameSentAt = now;
     poseEngine.send({ image: videoElement })
       .catch((err) => {
         console.error("Erro no envio do frame para o MediaPipe:", err);
@@ -1047,15 +1068,6 @@ document.addEventListener('DOMContentLoaded', () => {
       const sourceMode = sourceSelect.value;
       if ((sourceMode === 'webcam' || sourceMode === 'video') &&
           videoElement && videoElement.readyState >= 2 && !videoElement.paused && !videoElement.ended) {
-        resizeCanvas();
-        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-        canvasCtx.save();
-        if (sourceMode === 'webcam') {
-          canvasCtx.translate(canvasElement.width, 0);
-          canvasCtx.scale(-1, 1);
-        }
-        canvasCtx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
-        canvasCtx.restore();
         sendCurrentVideoFrameToPose();
       }
       animationFrameId = requestAnimationFrame(mainLoop);
@@ -1168,6 +1180,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const val = e.target.value;
     if (val === 'simulated') {
       stopMediaStream();
+      updateBleCameraPreviewLayer();
       hideCameraError();
       if (cameraDeviceSelect) cameraDeviceSelect.classList.add('hidden');
       updateStatusText("Motor Conectado (30 FPS)", "green");
@@ -1175,6 +1188,7 @@ document.addEventListener('DOMContentLoaded', () => {
       await startWebcamStream();
     } else if (val === 'video') {
       stopMediaStream();
+      updateBleCameraPreviewLayer();
       if (cameraDeviceSelect) cameraDeviceSelect.classList.add('hidden');
       videoFileInput.click();
     }
