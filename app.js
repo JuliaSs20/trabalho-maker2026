@@ -230,10 +230,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const angleRange = String(processedData.targetRange || "").match(/([\d.]+)°\s*a\s*([\d.]+)°/);
         const sensorOutsideRange = Number.isFinite(sensorAngle) && angleRange &&
           (sensorAngle < Number(angleRange[1]) || sensorAngle > Number(angleRange[2]));
-        const fullyExtended = processedData.exerciseKey === "biceps_curl" && Number.isFinite(sensorAngle) && sensorAngle >= 165;
+        const cameraAngle = Number(processedData.angulosAtuais.principalDeg);
+        const elbowAngle = Number.isFinite(sensorAngle) ? sensorAngle : cameraAngle;
+        const sensorExtensionSignal = Number.isFinite(latestSensorReading && latestSensorReading.rawPercent) &&
+          latestSensorReading.rawPercent <= 10;
+        const fullyExtended = processedData.exerciseKey === "biceps_curl" &&
+          ((Number.isFinite(elbowAngle) && elbowAngle >= 165) || sensorExtensionSignal);
         const nearFlexedTarget = processedData.exerciseKey === "biceps_curl" && Number.isFinite(sensorAngle) &&
           Math.abs(sensorAngle - 45) <= 5;
-        const needsCorrection = !nearFlexedTarget && Boolean(sensorOutsideRange || fullyExtended || latestCameraCorrection);
+        const needsCorrection = fullyExtended || (!nearFlexedTarget && Boolean(sensorOutsideRange || latestCameraCorrection));
         const overlayData = {
           ...processedData,
           angulosAtuais: { ...processedData.angulosAtuais, principalDeg: syncedAngle },
@@ -877,12 +882,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const rangeMatch = String(data.targetRange || "").match(/([\d.]+)°\s*a\s*([\d.]+)°/);
-    const bicepsFullyExtended = data.exerciseKey === "biceps_curl" && angleDeg >= 165;
+    const rawFlexionPercent = isSensorEvaluation && Number.isFinite(data.sensorTelemetry.rawPercent)
+      ? data.sensorTelemetry.rawPercent
+      : NaN;
+    const bicepsFullyExtended = data.exerciseKey === "biceps_curl" &&
+      (angleDeg >= 165 || (Number.isFinite(rawFlexionPercent) && rawFlexionPercent <= 10));
     const bicepsFlexedTarget = data.exerciseKey === "biceps_curl" && Math.abs(angleDeg - 45) <= 5;
-    const isWithinTarget = isSensorEvaluation
+    const isWithinTarget = !bicepsFullyExtended && (isSensorEvaluation
       ? Boolean(rangeMatch && angleDeg >= Number(rangeMatch[1]) && angleDeg <= Number(rangeMatch[2]) &&
-          (bicepsFlexedTarget || (!bicepsFullyExtended && latestCameraCorrection !== true)))
-      : data.qualidadeExecucao.status === 'EXCELENTE';
+          (bicepsFlexedTarget || latestCameraCorrection !== true))
+      : data.qualidadeExecucao.status === 'EXCELENTE');
     const sensorDisplayValue = isSensorEvaluation && Number.isInteger(data.sensorTelemetry.integerValue)
       ? String(data.sensorTelemetry.integerValue)
       : angleDeg.toFixed(1);
