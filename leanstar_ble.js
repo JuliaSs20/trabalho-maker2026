@@ -58,20 +58,21 @@ class LeanstarSignalFilter {
 class LeanstarAngleConverter {
   constructor() {
     // Valores padrão iniciais (Volts) caso o paciente ainda não tenha calibrado
-    this.voltageStraight0Deg = 2.150; // Membro esticado (0°)
-    this.voltageBent90Deg    = 1.250; // Membro fletido em 90°
+    this.voltageStraight180Deg = 2.150; // Braço estendido (180°)
+    // Calibrado para a tensão que antes aparecia como aproximadamente 46,3°.
+    this.voltageBent90Deg = 1.687; // Braço dobrado (90°)
     this.filter = new LeanstarSignalFilter(6, 0.22);
     this.lastFilteredVoltage = 2.150;
   }
 
   /**
-   * Calibra o ponto de extensão total (Membro esticado = 0°)
+   * Calibra o ponto de extensão total (braço estendido = 180°)
    * @param {number} currentVoltage Voltagem lida no momento da extensão
    */
-  calibrateZeroDegrees(currentVoltage = this.lastFilteredVoltage) {
-    this.voltageStraight0Deg = currentVoltage;
-    console.info(`[CALIBRAÇÃO LEANSTAR] Ponto 0° (Esticado) salvo em: ${currentVoltage.toFixed(3)} V`);
-    return this.voltageStraight0Deg;
+  calibrateExtension180Degrees(currentVoltage = this.lastFilteredVoltage) {
+    this.voltageStraight180Deg = currentVoltage;
+    console.info(`[CALIBRAÇÃO LEANSTAR] Braço estendido (180°) salvo em: ${currentVoltage.toFixed(3)} V`);
+    return this.voltageStraight180Deg;
   }
 
   /**
@@ -80,7 +81,7 @@ class LeanstarAngleConverter {
    */
   calibrateNinetyDegrees(currentVoltage = this.lastFilteredVoltage) {
     // Evita divisão por zero caso o usuário clique nos dois botões na mesma posição
-    if (Math.abs(currentVoltage - this.voltageStraight0Deg) < 0.02) {
+    if (Math.abs(currentVoltage - this.voltageStraight180Deg) < 0.02) {
       console.warn("[CALIBRAÇÃO LEANSTAR] A variação de tensão entre 0° e 90° é muito pequena! Dobre mais a fita.");
       return this.voltageBent90Deg;
     }
@@ -98,15 +99,15 @@ class LeanstarAngleConverter {
     const cleanVoltage = this.filter.process(rawVoltage);
     this.lastFilteredVoltage = cleanVoltage;
 
-    // 2. Interpolação Linear baseada nos 2 pontos de calibração (0° e 90°)
-    // Equação da reta: Angle = ((V_atual - V_0) / (V_90 - V_0)) * 90.0
-    const deltaVCalib = this.voltageBent90Deg - this.voltageStraight0Deg;
-    if (Math.abs(deltaVCalib) < 0.001) return 0.0;
+    // 2. Interpolação entre braço estendido (180°) e dobrado (90°).
+    const deltaVCalib = this.voltageBent90Deg - this.voltageStraight180Deg;
+    if (Math.abs(deltaVCalib) < 0.001) return NaN;
 
-    let angleDeg = ((cleanVoltage - this.voltageStraight0Deg) / deltaVCalib) * 90.0;
+    const flexionProgress = (cleanVoltage - this.voltageStraight180Deg) / deltaVCalib;
+    let angleDeg = 180.0 - (flexionProgress * 90.0);
 
-    // 3. Clamping Fisiológico (Limita a leitura entre 0.0° e 180.0°)
-    angleDeg = Math.max(0.0, Math.min(180.0, angleDeg));
+    // 3. Limita a leitura ao intervalo esperado: 90° dobrado a 180° estendido.
+    angleDeg = Math.max(90.0, Math.min(180.0, angleDeg));
 
     return parseFloat(angleDeg.toFixed(1));
   }
