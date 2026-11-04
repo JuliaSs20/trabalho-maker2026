@@ -140,11 +140,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function updateBleCameraPreviewLayer() {
     if (!videoElement) return;
-    // Keep the camera active for pose tracking, but show only the animated skeleton.
-    videoElement.style.display = 'none';
-    videoElement.style.opacity = '0';
-    videoElement.style.transform = 'none';
-    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+    const cameraSourceActive = sourceSelect.value === 'webcam' || sourceSelect.value === 'video';
+    // Show the live camera behind the animated pose overlay, including during BLE use.
+    videoElement.style.display = cameraSourceActive ? 'block' : 'none';
+    videoElement.style.opacity = cameraSourceActive ? '1' : '0.8';
+    videoElement.style.transform = sourceSelect.value === 'webcam' ? 'scaleX(-1)' : 'none';
+    if (cameraSourceActive) canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
   }
 
   async function initPoseEngine() {
@@ -353,7 +354,7 @@ document.addEventListener('DOMContentLoaded', () => {
         await new Promise((resolve) => videoElement.addEventListener('loadeddata', resolve, { once: true }));
       }
 
-      // Mantém o vídeo oculto no painel; só a animação do rastreamento será exibida.
+      // Mostra o vídeo ao vivo sob a animação de rastreamento.
       resizeCanvas();
       canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
       updateStatusText("Câmera aberta; iniciando análise...", "yellow");
