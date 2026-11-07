@@ -247,7 +247,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ...processedData.qualidadeExecucao,
             status: needsCorrection ? "ATENÇÃO" : "EXCELENTE",
             mensagemFeedback: nearFlexedTarget
-              ? "Flexão próxima de 45°. Boa contração do bíceps!"
+              ? "Flexão próxima de 90°. Boa contração do bíceps!"
               : fullyExtended
               ? "Flexione um pouco o cotovelo; a leitura do sensor está sincronizada com o braço direito."
               : latestCameraCorrection
@@ -894,7 +894,7 @@ document.addEventListener('DOMContentLoaded', () => {
       (isSensorEvaluation ? angleDeg >= 85 : Math.abs(angleDeg - 45) <= 5);
     const isWithinTarget = !bicepsFullyExtended && (isSensorEvaluation
       ? Boolean(rangeMatch && angleDeg >= Number(rangeMatch[1]) && angleDeg <= Number(rangeMatch[2]) &&
-          (bicepsFlexedTarget || latestCameraCorrection !== true))
+          (bicepsFlexedTarget || (!bicepsFullyExtended && latestCameraCorrection !== true)))
       : data.qualidadeExecucao.status === 'EXCELENTE');
     const sensorDisplayValue = isSensorEvaluation && Number.isInteger(data.sensorTelemetry.integerValue)
       ? String(data.sensorTelemetry.integerValue)
@@ -904,7 +904,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const msg = isSensorEvaluation
       ? isWithinTarget
         ? bicepsFlexedTarget
-          ? "Flexão próxima de 45°. Boa contração do bíceps!"
+          ? "Flexão próxima de 90°. Boa contração do bíceps!"
           : `Ângulo do sensor dentro da faixa-alvo (${data.targetRange}).`
         : bicepsFullyExtended
           ? `Flexione um pouco o cotovelo. Leitura do sensor: ${angleDeg.toFixed(1)}°.`

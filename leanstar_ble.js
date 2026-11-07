@@ -369,6 +369,25 @@ class LeanstarBLEManager {
       return;
     }
 
+    // Compatibilidade com o firmware atual, que transmite percentual como
+    // Cotovelo:XX ou C:XX (0% estendido, 100% flexionado).
+    const elbowIntegerMatch = text.match(/^(?:Cotovelo|C)\s*:\s*(\d+)$/i);
+    if (elbowIntegerMatch) {
+      const rawPercent = Number.parseInt(elbowIntegerMatch[1], 10);
+      if (rawPercent < 0 || rawPercent > 100) {
+        console.warn("[BLE STREAM] Percentual de flexão inválido; esperava 0 a 100:", text);
+        return;
+      }
+      this.onDataCallback({
+        timestamp: Date.now(),
+        angleDeg: Number(((rawPercent * 90) / 100).toFixed(1)),
+        rawPercent,
+        rawValue: text,
+        targetJointName: "Ângulo do Cotovelo"
+      });
+      return;
+    }
+
     const percentMatch = text.match(/([-+]?(?:\d+\.?\d*|\.\d+))\s*%/);
     const labeledAngleMatch = text.match(/(?:^|[^A-Za-zÀ-ÿ])(?:cotovelo|ângulo|angulo|angle|flex[aã]o)[^0-9+\-]{0,32}([-+]?(?:\d+\.?\d*|\.\d+))/i);
     const numberMatch = labeledAngleMatch || text.match(/[-+]?(?:\d+\.?\d*|\.\d+)/);
@@ -387,8 +406,8 @@ class LeanstarBLEManager {
       ? (rawPercent * 90) / 100
       : numericValue;
 
-    if (!Number.isFinite(angleDeg) || angleDeg < 0 || angleDeg > 180 || (rawPercent !== null && (rawPercent < 0 || rawPercent > 100))) {
-      console.warn("[BLE STREAM] Leitura ignorada; esperava ângulo identificado (0–180°) ou percentual (0–100%):", text);
+    if (!Number.isFinite(angleDeg) || angleDeg < 0 || angleDeg > 90 || (rawPercent !== null && (rawPercent < 0 || rawPercent > 100))) {
+      console.warn("[BLE STREAM] Leitura ignorada; esperava ângulo identificado (0–90°) ou percentual (0–100%):", text);
       return;
     }
 
