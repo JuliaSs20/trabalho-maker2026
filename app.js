@@ -163,7 +163,7 @@ document.addEventListener('DOMContentLoaded', () => {
       sensorAngleDisplayLastFrameAt = now;
       const targetAngle = sensorAngleDisplayTarget ?? angleDeg;
       const remainingDifference = targetAngle - displayedSensorAngle;
-      const maxStep = 90 * (deltaMs / 1000);
+      const maxStep = 120 * (deltaMs / 1000);
       if (Math.abs(remainingDifference) <= maxStep) {
         displayedSensorAngle = targetAngle;
       } else {
@@ -1051,6 +1051,9 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       sessionUsedBleSensor = true;
       latestSensorReading = { ...reading, angleDeg: sensorAngle };
+      // Feed every BLE sample into the visual readout; the heavier dashboard
+      // and JSON update remains coalesced below.
+      updateAngleReadouts(sensorAngle, true, Number.isInteger(reading.integerValue), 90);
       const data = analyzer.processSensorAngle(sensorAngle);
       data.sensorTelemetry = { ...reading, angleDeg: sensorAngle };
       if (reading.targetJointName) data.sensorTelemetry.targetJointName = reading.targetJointName;
