@@ -87,6 +87,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let displayedSensorAngle = null;
   let sensorAngleDisplayTarget = null;
   let sensorAngleDisplayFrame = null;
+  let sensorAngleDisplayLastFrameAt = null;
   let sensorAngleDisplayUsesInteger = false;
 
   // Estado do Motor MediaPipe Pose & Conexão de Mídia
@@ -127,6 +128,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!isSensorEvaluation) {
       if (sensorAngleDisplayFrame !== null) cancelAnimationFrame(sensorAngleDisplayFrame);
       sensorAngleDisplayFrame = null;
+      sensorAngleDisplayLastFrameAt = null;
       displayedSensorAngle = angleDeg;
       sensorAngleDisplayTarget = angleDeg;
       renderAngleReadouts(angleDeg, false);
@@ -141,27 +143,29 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     if (sensorAngleDisplayFrame !== null) return;
-    if (Math.abs(displayedSensorAngle - angleDeg) < 0.05) {
+    if (Math.abs(displayedSensorAngle - angleDeg) < 0.04) {
       displayedSensorAngle = angleDeg;
       renderAngleReadouts(angleDeg, useInteger);
       return;
     }
 
-    const startAngle = displayedSensorAngle;
-    const startTime = performance.now();
-    const durationMs = 240;
     const animate = (now) => {
-      const progress = Math.min(1, (now - startTime) / durationMs);
-      const easedProgress = 1 - Math.pow(1 - progress, 3);
+      const deltaMs = sensorAngleDisplayLastFrameAt === null
+        ? 16
+        : Math.min(50, now - sensorAngleDisplayLastFrameAt);
+      sensorAngleDisplayLastFrameAt = now;
       const targetAngle = sensorAngleDisplayTarget ?? angleDeg;
-      displayedSensorAngle = startAngle + ((targetAngle - startAngle) * easedProgress);
+      const remainingDifference = targetAngle - displayedSensorAngle;
+      const blend = 1 - Math.exp(-deltaMs / 420);
+      displayedSensorAngle += remainingDifference * blend;
       renderAngleReadouts(displayedSensorAngle, sensorAngleDisplayUsesInteger);
 
-      if (progress < 1) {
+      if (Math.abs(targetAngle - displayedSensorAngle) > 0.04) {
         sensorAngleDisplayFrame = requestAnimationFrame(animate);
       } else {
         displayedSensorAngle = targetAngle;
         sensorAngleDisplayFrame = null;
+        sensorAngleDisplayLastFrameAt = null;
         renderAngleReadouts(displayedSensorAngle, sensorAngleDisplayUsesInteger);
       }
     };
@@ -174,6 +178,7 @@ document.addEventListener('DOMContentLoaded', () => {
     sensorUiUpdateTimer = null;
     latestSensorUiData = null;
     sensorAngleDisplayFrame = null;
+    sensorAngleDisplayLastFrameAt = null;
     displayedSensorAngle = null;
     sensorAngleDisplayTarget = null;
   }
