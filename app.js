@@ -84,6 +84,10 @@ document.addEventListener('DOMContentLoaded', () => {
   let lastFeedbackIconState = null;
   let latestCameraCorrection = null;
   let latestCameraFeedback = "";
+  let displayedSensorAngle = null;
+  let sensorAngleDisplayTarget = null;
+  let sensorAngleDisplayFrame = null;
+  let sensorAngleDisplayUsesInteger = false;
 
   // Estado do Motor MediaPipe Pose & Conexão de Mídia
   let poseEngine = null;
@@ -110,6 +114,68 @@ document.addEventListener('DOMContentLoaded', () => {
 
     lastSpokenMessage = msg;
     lastSpeechTime = now;
+  }
+
+  function renderAngleReadouts(angleDeg, useInteger) {
+    const shownAngle = useInteger ? String(Math.round(angleDeg)) : angleDeg.toFixed(1);
+    valKneeAngle.textContent = `${shownAngle}°`;
+    hudKneeAngle.textContent = `${angleDeg.toFixed(0)}°`;
+  }
+
+  // Ease only the visible readouts. Sensor values used by validation and JSON stay raw.
+  function updateAngleReadouts(angleDeg, isSensorEvaluation, useInteger = false) {
+    if (!isSensorEvaluation) {
+      if (sensorAngleDisplayFrame !== null) cancelAnimationFrame(sensorAngleDisplayFrame);
+      sensorAngleDisplayFrame = null;
+      displayedSensorAngle = angleDeg;
+      sensorAngleDisplayTarget = angleDeg;
+      renderAngleReadouts(angleDeg, false);
+      return;
+    }
+
+    sensorAngleDisplayTarget = angleDeg;
+    sensorAngleDisplayUsesInteger = useInteger;
+    if (displayedSensorAngle === null) {
+      displayedSensorAngle = angleDeg;
+      renderAngleReadouts(angleDeg, useInteger);
+      return;
+    }
+    if (sensorAngleDisplayFrame !== null) return;
+    if (Math.abs(displayedSensorAngle - angleDeg) < 0.05) {
+      displayedSensorAngle = angleDeg;
+      renderAngleReadouts(angleDeg, useInteger);
+      return;
+    }
+
+    const startAngle = displayedSensorAngle;
+    const startTime = performance.now();
+    const durationMs = 240;
+    const animate = (now) => {
+      const progress = Math.min(1, (now - startTime) / durationMs);
+      const easedProgress = 1 - Math.pow(1 - progress, 3);
+      const targetAngle = sensorAngleDisplayTarget ?? angleDeg;
+      displayedSensorAngle = startAngle + ((targetAngle - startAngle) * easedProgress);
+      renderAngleReadouts(displayedSensorAngle, sensorAngleDisplayUsesInteger);
+
+      if (progress < 1) {
+        sensorAngleDisplayFrame = requestAnimationFrame(animate);
+      } else {
+        displayedSensorAngle = targetAngle;
+        sensorAngleDisplayFrame = null;
+        renderAngleReadouts(displayedSensorAngle, sensorAngleDisplayUsesInteger);
+      }
+    };
+    sensorAngleDisplayFrame = requestAnimationFrame(animate);
+  }
+
+  function resetAngleReadouts() {
+    if (sensorAngleDisplayFrame !== null) cancelAnimationFrame(sensorAngleDisplayFrame);
+    if (sensorUiUpdateTimer !== null) window.clearTimeout(sensorUiUpdateTimer);
+    sensorUiUpdateTimer = null;
+    latestSensorUiData = null;
+    sensorAngleDisplayFrame = null;
+    displayedSensorAngle = null;
+    sensorAngleDisplayTarget = null;
   }
 
   function resizeCanvas() {
@@ -242,7 +308,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const overlayData = {
           ...processedData,
           targetRange: sensorTargetRange,
-          angulosAtuais: { ...processedData.angulosAtuais, principalDeg: syncedAngle },
+          angulosAtuais: {
+            ...processedData.angulosAtuais,
+            principalDeg: Number.isFinite(displayedSensorAngle) ? displayedSensorAngle : syncedAngle
+          },
           qualidadeExecucao: {
             ...processedData.qualidadeExecucao,
             status: needsCorrection ? "ATENÇÃO" : "EXCELENTE",
@@ -874,7 +943,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (isSensorEvaluation) data.angulosAtuais.principalDeg = angleDeg;
 
     hudPhaseText.textContent = data.faseMovimento ? data.faseMovimento.toUpperCase() : "NEUTRO";
-    hudKneeAngle.textContent = `${angleDeg.toFixed(0)}°`;
     if (hudAngleSub) {
       hudAngleSub.textContent = isSensorEvaluation
         ? (data.sensorTelemetry.targetJointName || "Ângulo do Cotovelo")
@@ -896,9 +964,7 @@ document.addEventListener('DOMContentLoaded', () => {
       ? Boolean(rangeMatch && angleDeg >= Number(rangeMatch[1]) && angleDeg <= Number(rangeMatch[2]) &&
           (bicepsFlexedTarget || (!bicepsFullyExtended && latestCameraCorrection !== true)))
       : data.qualidadeExecucao.status === 'EXCELENTE');
-    const sensorDisplayValue = isSensorEvaluation && Number.isInteger(data.sensorTelemetry.integerValue)
-      ? String(data.sensorTelemetry.integerValue)
-      : angleDeg.toFixed(1);
+    const sensorDisplayUsesInteger = isSensorEvaluation && Number.isInteger(data.sensorTelemetry.integerValue);
     const needsCorrection = !isWithinTarget;
     const status = isWithinTarget ? 'EXCELENTE' : 'ATENÇÃO';
     const msg = isSensorEvaluation
@@ -936,7 +1002,7 @@ document.addEventListener('DOMContentLoaded', () => {
       canvasWarningToast.classList.add('hidden');
     }
 
-    valKneeAngle.textContent = `${sensorDisplayValue}°`;
+    updateAngleReadouts(angleDeg, isSensorEvaluation, sensorDisplayUsesInteger);
     if (targetKneeAngle && data.targetRange) {
       targetKneeAngle.textContent = `Alvo: ${data.targetRange}`;
     }
@@ -1001,6 +1067,7 @@ document.addEventListener('DOMContentLoaded', () => {
     (connected, deviceName, reconnecting = false) => {
       if (connected) {
         sessionUsedBleSensor = true;
+        resetAngleReadouts();
         latestSensorReading = null;
         latestCameraCorrection = null;
         latestCameraFeedback = "";
@@ -1022,6 +1089,7 @@ document.addEventListener('DOMContentLoaded', () => {
           updateStatusText("Sensor conectado, aguardando dados do Arduino", "red");
         }, 2500);
       } else {
+        resetAngleReadouts();
         latestSensorReading = null;
         latestCameraCorrection = null;
         latestCameraFeedback = "";
