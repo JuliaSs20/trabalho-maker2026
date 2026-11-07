@@ -88,6 +88,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let sensorAngleDisplayTarget = null;
   let sensorAngleDisplayFrame = null;
   let sensorAngleDisplayLastFrameAt = null;
+  let sensorAngleDisplayMaxAngle = 90;
   let sensorAngleDisplayUsesInteger = false;
 
   // Estado do Motor MediaPipe Pose & Conexão de Mídia
@@ -117,35 +118,41 @@ document.addEventListener('DOMContentLoaded', () => {
     lastSpeechTime = now;
   }
 
-  function renderAngleReadouts(angleDeg, useInteger) {
+  function renderAngleReadouts(angleDeg, useInteger, maxAngle) {
     const shownAngle = useInteger ? String(Math.round(angleDeg)) : angleDeg.toFixed(1);
     valKneeAngle.textContent = `${shownAngle}°`;
     hudKneeAngle.textContent = `${angleDeg.toFixed(0)}°`;
+    const fill = Math.min(100, Math.max(0, (angleDeg / maxAngle) * 100));
+    barKneeFlexion.style.width = `${fill}%`;
   }
 
-  // Ease only the visible readouts. Sensor values used by validation and JSON stay raw.
-  function updateAngleReadouts(angleDeg, isSensorEvaluation, useInteger = false) {
+  // Limit the visual rate only; analysis and JSON continue to use the raw sensor value.
+  function updateAngleReadouts(angleDeg, isSensorEvaluation, useInteger = false, maxAngle = 90) {
     if (!isSensorEvaluation) {
       if (sensorAngleDisplayFrame !== null) cancelAnimationFrame(sensorAngleDisplayFrame);
       sensorAngleDisplayFrame = null;
       sensorAngleDisplayLastFrameAt = null;
       displayedSensorAngle = angleDeg;
       sensorAngleDisplayTarget = angleDeg;
-      renderAngleReadouts(angleDeg, false);
+      sensorAngleDisplayMaxAngle = maxAngle;
+      barKneeFlexion.style.transition = '';
+      renderAngleReadouts(angleDeg, false, maxAngle);
       return;
     }
 
     sensorAngleDisplayTarget = angleDeg;
+    sensorAngleDisplayMaxAngle = maxAngle;
     sensorAngleDisplayUsesInteger = useInteger;
+    barKneeFlexion.style.transition = 'none';
     if (displayedSensorAngle === null) {
       displayedSensorAngle = angleDeg;
-      renderAngleReadouts(angleDeg, useInteger);
+      renderAngleReadouts(angleDeg, useInteger, maxAngle);
       return;
     }
     if (sensorAngleDisplayFrame !== null) return;
     if (Math.abs(displayedSensorAngle - angleDeg) < 0.04) {
       displayedSensorAngle = angleDeg;
-      renderAngleReadouts(angleDeg, useInteger);
+      renderAngleReadouts(angleDeg, useInteger, maxAngle);
       return;
     }
 
@@ -156,17 +163,19 @@ document.addEventListener('DOMContentLoaded', () => {
       sensorAngleDisplayLastFrameAt = now;
       const targetAngle = sensorAngleDisplayTarget ?? angleDeg;
       const remainingDifference = targetAngle - displayedSensorAngle;
-      const blend = 1 - Math.exp(-deltaMs / 420);
-      displayedSensorAngle += remainingDifference * blend;
-      renderAngleReadouts(displayedSensorAngle, sensorAngleDisplayUsesInteger);
+      const maxStep = 90 * (deltaMs / 1000);
+      if (Math.abs(remainingDifference) <= maxStep) {
+        displayedSensorAngle = targetAngle;
+      } else {
+        displayedSensorAngle += Math.sign(remainingDifference) * maxStep;
+      }
+      renderAngleReadouts(displayedSensorAngle, sensorAngleDisplayUsesInteger, sensorAngleDisplayMaxAngle);
 
-      if (Math.abs(targetAngle - displayedSensorAngle) > 0.04) {
+      if (displayedSensorAngle !== targetAngle) {
         sensorAngleDisplayFrame = requestAnimationFrame(animate);
       } else {
-        displayedSensorAngle = targetAngle;
         sensorAngleDisplayFrame = null;
         sensorAngleDisplayLastFrameAt = null;
-        renderAngleReadouts(displayedSensorAngle, sensorAngleDisplayUsesInteger);
       }
     };
     sensorAngleDisplayFrame = requestAnimationFrame(animate);
@@ -1007,13 +1016,10 @@ document.addEventListener('DOMContentLoaded', () => {
       canvasWarningToast.classList.add('hidden');
     }
 
-    updateAngleReadouts(angleDeg, isSensorEvaluation, sensorDisplayUsesInteger);
+    updateAngleReadouts(angleDeg, isSensorEvaluation, sensorDisplayUsesInteger, maxAngle);
     if (targetKneeAngle && data.targetRange) {
       targetKneeAngle.textContent = `Alvo: ${data.targetRange}`;
     }
-    const mainPct = Math.min(100, Math.max(0, (angleDeg / maxAngle) * 100));
-    barKneeFlexion.style.width = `${mainPct}%`;
-
     valTrunkAngle.textContent = `${data.angulosAtuais.secundarioDeg.toFixed(1)}°`;
     const secPct = Math.min(100, (data.angulosAtuais.secundarioDeg / 45) * 100);
     barTrunkAngle.style.width = `${secPct}%`;
