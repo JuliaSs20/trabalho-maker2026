@@ -60,7 +60,8 @@ class LeanstarAngleConverter {
     // Calibre estes valores conforme as leituras reais do sensor (ADC 0–1023).
     this.sensorStraight = 300; // Braço estendido = 0° (VALOR_RETO do firmware)
     this.sensorBent = 850;     // Cotovelo flexionado = 90° (VALOR_DOBRADO do firmware)
-    this.filter = new LeanstarSignalFilter(6, 0.35);
+    // Um pouco mais responsivo, preservando suavização contra ruído do sensor.
+    this.filter = new LeanstarSignalFilter(4, 0.5);
     this.lastFilteredValue = this.sensorStraight;
   }
 
