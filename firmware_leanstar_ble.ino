@@ -44,9 +44,11 @@ void loop() {
   Serial.print(valorFinal);
   Serial.println("%");
 
-  // O site recebe este percentual e o converte para 0°–90°.
-  meuBluetooth.print("Cotovelo:");
-  meuBluetooth.println(valorFinal);
+  // Envia a leitura ADC original para o site converter com a mesma calibração.
+  // Assim o Bluetooth preserva todos os valores intermediários, sem arredondar
+  // a leitura para um percentual inteiro antes da conversão angular.
+  meuBluetooth.print("FLEX:");
+  meuBluetooth.println(valorBruto);
 
   delay(80);
 }

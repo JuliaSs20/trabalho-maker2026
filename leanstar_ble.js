@@ -58,9 +58,9 @@ class LeanstarSignalFilter {
 class LeanstarAngleConverter {
   constructor() {
     // Calibre estes valores conforme as leituras reais do sensor (ADC 0–1023).
-    this.sensorStraight = 300; // Braço estendido = 0°
-    this.sensorBent = 600;     // Cotovelo flexionado = 90°
-    this.filter = new LeanstarSignalFilter(1, 0.85);
+    this.sensorStraight = 300; // Braço estendido = 0° (VALOR_RETO do firmware)
+    this.sensorBent = 850;     // Cotovelo flexionado = 90° (VALOR_DOBRADO do firmware)
+    this.filter = new LeanstarSignalFilter(6, 0.35);
     this.lastFilteredValue = this.sensorStraight;
   }
 
@@ -344,7 +344,7 @@ class LeanstarBLEManager {
     const text = value.trim().replace(',', '.');
     if (!text) return;
 
-    // O Arduino envia a leitura ADC de 10 bits no formato FLEX:valor.
+    // O Arduino transmite a leitura ADC de 10 bits no formato FLEX:valor.
     const flexMatch = text.match(/^FLEX\s*:\s*(\d+)$/i);
     if (flexMatch) {
       const rawValue = Number.parseInt(flexMatch[1], 10);
