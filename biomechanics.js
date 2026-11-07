@@ -805,18 +805,21 @@ class TherapeuticExerciseAnalyzer {
     const protocols = {
       squat: { start: 155, target: 92, startDirection: "above", targetDirection: "below", targetRange: "78° a 92°" },
       shoulder_abduction: { start: 150, target: 95, startDirection: "above", targetDirection: "below", targetRange: "85° a 95°" },
-      biceps_curl: { start: 140, target: 45, startDirection: "above", targetDirection: "below", targetRange: "45° a 180°" },
+      biceps_curl: { start: 5, target: 85, startDirection: "below", targetDirection: "above", targetRange: "45° a 90°" },
       triceps_extension: { start: 95, target: 165, startDirection: "below", targetDirection: "above", targetRange: "165° a 180°" }
     };
     const exerciseConfig = ExerciseLibrary[this.currentExerciseKey] || ExerciseLibrary.squat;
     const protocol = protocols[this.currentExerciseKey] || protocols.squat;
-    const rangeBounds = exerciseConfig.targetRange.match(/([\d.]+)°\s*a\s*([\d.]+)°/);
+    const targetRange = this.currentExerciseKey === "biceps_curl"
+      ? "45.0° a 90.0°"
+      : exerciseConfig.targetRange;
+    const rangeBounds = targetRange.match(/([\d.]+)°\s*a\s*([\d.]+)°/);
     const targetMin = rangeBounds ? Number(rangeBounds[1]) : 80;
     const targetMax = rangeBounds ? Number(rangeBounds[2]) : 90;
     protocol.target = this.currentExerciseKey === "biceps_curl"
-      ? targetMin
+      ? targetMax
       : protocol.targetDirection === "above" ? targetMin : targetMax;
-    protocol.targetRange = exerciseConfig.targetRange;
+    protocol.targetRange = targetRange;
     const isAtThreshold = (value, threshold, direction) =>
       direction === "above" ? value >= threshold : value <= threshold;
     const isAtStart = isAtThreshold(angleDeg, protocol.start, protocol.startDirection);

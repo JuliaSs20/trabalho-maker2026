@@ -53,63 +53,52 @@ class LeanstarSignalFilter {
 }
 
 /**
- * Motor de Calibração e Mapeamento Voltagem -> Ângulo Articular (0° a 180°)
+ * Calibração da leitura analógica do sensor para um ângulo de 0° a 90°.
  */
 class LeanstarAngleConverter {
   constructor() {
-    // Valores padrão iniciais (Volts) caso o paciente ainda não tenha calibrado
-    this.voltageStraight180Deg = 2.150; // Braço estendido (180°)
-    // A tensão de referência corresponde ao limite de flexão configurado em 45°.
-    this.voltageBent45Deg = 1.687; // Braço flexionado (45°)
-    this.filter = new LeanstarSignalFilter(6, 0.22);
-    this.lastFilteredVoltage = 2.150;
+    // Calibre estes valores conforme as leituras reais do sensor (ADC 0–1023).
+    this.sensorStraight = 300; // Braço estendido = 0°
+    this.sensorBent = 600;     // Cotovelo flexionado = 90°
+    this.filter = new LeanstarSignalFilter(1, 0.85);
+    this.lastFilteredValue = this.sensorStraight;
   }
 
   /**
-   * Calibra o ponto de extensão total (braço estendido = 180°)
-   * @param {number} currentVoltage Tensão lida com o braço estendido a 180°
+   * Calibra o valor analógico do braço estendido (0°).
+   * @param {number} currentValue Leitura ADC com o braço estendido.
    */
-  calibrateExtension180Degrees(currentVoltage = this.lastFilteredVoltage) {
-    this.voltageStraight180Deg = currentVoltage;
-    console.info(`[CALIBRAÇÃO LEANSTAR] Braço estendido (180°) salvo em: ${currentVoltage.toFixed(3)} V`);
-    return this.voltageStraight180Deg;
+  calibrateExtension(currentValue = this.lastFilteredValue) {
+    this.sensorStraight = currentValue;
+    console.info(`[CALIBRAÇÃO] Braço estendido: ${currentValue}`);
+    return this.sensorStraight;
   }
 
   /**
-   * Calibra o ponto de flexão de referência (braço flexionado = 45°)
-   * @param {number} currentVoltage Tensão lida com o braço flexionado a 45°
+   * Calibra o valor analógico do cotovelo flexionado (90°).
+   * @param {number} currentValue Leitura ADC com o cotovelo flexionado.
    */
-  calibrateFlexed45Degrees(currentVoltage = this.lastFilteredVoltage) {
-    // Evita divisão por zero caso o usuário clique nos dois botões na mesma posição
-    if (Math.abs(currentVoltage - this.voltageStraight180Deg) < 0.02) {
-      console.warn("[CALIBRAÇÃO LEANSTAR] A variação de tensão entre 180° e 45° é muito pequena! Dobre mais a fita.");
-      return this.voltageBent45Deg;
+  calibrateFlexion(currentValue = this.lastFilteredValue) {
+    if (Math.abs(currentValue - this.sensorStraight) < 5) {
+      console.warn("[CALIBRAÇÃO] Variação insuficiente no sensor.");
+      return this.sensorBent;
     }
-    this.voltageBent45Deg = currentVoltage;
-    console.info(`[CALIBRAÇÃO LEANSTAR] Braço flexionado (45°) salvo em: ${currentVoltage.toFixed(3)} V`);
-    return this.voltageBent45Deg;
+    this.sensorBent = currentValue;
+    console.info(`[CALIBRAÇÃO] Cotovelo flexionado: ${currentValue}`);
+    return this.sensorBent;
   }
 
   /**
-   * Converte a voltagem recebida em um ângulo articular suavizado (0° a 180°)
-   * Utiliza interpolação/extrapolação linear calibrada com clamping seguro.
+   * Converte uma leitura analógica (0–1023) para um ângulo estimado (0–90°).
    */
-  voltageToAngle(rawVoltage) {
-    // 1. Filtra o ruído analógico da fita Leanstar
-    const cleanVoltage = this.filter.process(rawVoltage);
-    this.lastFilteredVoltage = cleanVoltage;
-
-    // 2. Interpolação entre braço estendido (180°) e flexionado (45°).
-    const deltaVCalib = this.voltageBent45Deg - this.voltageStraight180Deg;
-    if (Math.abs(deltaVCalib) < 0.001) return NaN;
-
-    const flexionProgress = (cleanVoltage - this.voltageStraight180Deg) / deltaVCalib;
-    let angleDeg = 180.0 - (flexionProgress * 135.0);
-
-    // 3. Limita a leitura ao intervalo esperado: 45° flexionado a 180° estendido.
-    angleDeg = Math.max(45.0, Math.min(180.0, angleDeg));
-
-    return parseFloat(angleDeg.toFixed(1));
+  rawValueToAngle(rawValue) {
+    const cleanValue = this.filter.process(rawValue);
+    this.lastFilteredValue = cleanValue;
+    const difference = this.sensorBent - this.sensorStraight;
+    if (Math.abs(difference) < 1) return NaN;
+    const progress = (cleanValue - this.sensorStraight) / difference;
+    const angleDeg = Math.max(0, Math.min(90, progress * 90));
+    return Number(angleDeg.toFixed(1));
   }
 }
 
@@ -155,10 +144,6 @@ class LeanstarBLEManager {
     this.onStatusCallback = onStatusCallback || (() => {});
     this.decoder = new TextDecoder('utf-8');
     this.angleConverter = new LeanstarAngleConverter();
-    // The Arduino sketch sends 0% at extension and 100% at flexion.
-    // Map that range to the elbow's expected 180°-to-45° interior angle.
-    this.extendedAngleDeg = 180;
-    this.flexedAngleDeg = 45;
   }
 
   /**
@@ -317,14 +302,19 @@ class LeanstarBLEManager {
       const voltage = dataView.getFloat32(4, true);
       const resistanceOhms = dataView.getFloat32(8, true);
       if (Number.isFinite(voltage) && voltage >= 0 && voltage <= 3.3) {
-        const angleDeg = this.angleConverter.voltageToAngle(voltage);
+        // The firmware packet contains a 12-bit ADC reading; normalize it to
+        // the 10-bit 0–1023 scale used by the text protocol and calibration.
+        const rawSensorValue = Math.round((rawAdc / 4095) * 1023);
+        const angleDeg = this.angleConverter.rawValueToAngle(rawSensorValue);
         this.onDataCallback({
           timestamp: Date.now(),
           angleDeg,
-          rawValue: `${voltage.toFixed(3)} V`,
+          rawSensorValue,
+          rawValue: String(rawSensorValue),
           rawAdc,
           voltage,
-          resistanceOhms
+          resistanceOhms,
+          targetJointName: "Ângulo do Cotovelo"
         });
         return;
       }
@@ -354,20 +344,27 @@ class LeanstarBLEManager {
     const text = value.trim().replace(',', '.');
     if (!text) return;
 
-    // The Arduino's text protocol sends flexion progress, not degrees: "Cotovelo:XX" (0–100%).
-    const elbowIntegerMatch = text.match(/^Cotovelo\s*:\s*(\d+)$/i);
-    if (elbowIntegerMatch) {
-      const rawPercent = Number.parseInt(elbowIntegerMatch[1], 10);
-      if (rawPercent < 0 || rawPercent > 100) {
-        console.warn("[BLE STREAM] Valor Cotovelo ignorado; esperava inteiro de 0 a 100:", text);
+    // O Arduino envia a leitura ADC de 10 bits no formato FLEX:valor.
+    const flexMatch = text.match(/^FLEX\s*:\s*(\d+)$/i);
+    if (flexMatch) {
+      const rawValue = Number.parseInt(flexMatch[1], 10);
+      if (!Number.isInteger(rawValue) || rawValue < 0 || rawValue > 1023) {
+        console.warn("[BLE STREAM] Leitura FLEX inválida; esperava valor de 0 a 1023:", text);
         return;
       }
-      const angleDeg = this.extendedAngleDeg + ((this.flexedAngleDeg - this.extendedAngleDeg) * rawPercent) / 100;
+
+      const angleDeg = this.angleConverter.rawValueToAngle(rawValue);
+      if (!Number.isFinite(angleDeg)) {
+        console.warn("[BLE STREAM] Não foi possível calcular o ângulo.", text);
+        return;
+      }
+
       this.onDataCallback({
         timestamp: Date.now(),
-        angleDeg: parseFloat(angleDeg.toFixed(1)),
-        rawPercent,
-        rawValue: text
+        angleDeg,
+        rawSensorValue: rawValue,
+        rawValue: text,
+        targetJointName: "Ângulo do Cotovelo"
       });
       return;
     }
@@ -387,7 +384,7 @@ class LeanstarBLEManager {
     );
     const rawPercent = percentMatch ? Number(percentMatch[1]) : isPercent ? numericValue : null;
     const angleDeg = rawPercent !== null
-      ? this.extendedAngleDeg + ((this.flexedAngleDeg - this.extendedAngleDeg) * rawPercent) / 100
+      ? (rawPercent * 90) / 100
       : numericValue;
 
     if (!Number.isFinite(angleDeg) || angleDeg < 0 || angleDeg > 180 || (rawPercent !== null && (rawPercent < 0 || rawPercent > 100))) {
