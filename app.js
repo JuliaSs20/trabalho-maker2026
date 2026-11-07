@@ -344,7 +344,20 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      renderBiomechanicalOverlay(processedData.landmarksProcessed, processedData, sourceMode === 'webcam');
+      // Para rosca direta, mostre a escala clínica de 0° (braço estendido) a
+      // 45° (cotovelo flexionado), mantendo a análise da câmera em graus anatômicos.
+      const overlayData = processedData.exerciseKey === "biceps_curl"
+        ? {
+            ...processedData,
+            targetRange: "0.0° a 45.0°",
+            angulosAtuais: {
+              ...processedData.angulosAtuais,
+              principalDeg: Math.max(0, Math.min(45,
+                ((180 - Number(processedData.angulosAtuais.principalDeg)) / 135) * 45))
+            }
+          }
+        : processedData;
+      renderBiomechanicalOverlay(processedData.landmarksProcessed, overlayData, sourceMode === 'webcam');
       updatePatientUI(processedData);
     } else if (sourceMode === 'webcam' || sourceMode === 'video') {
       if (bleSensor.isConnected) {
@@ -949,12 +962,17 @@ document.addEventListener('DOMContentLoaded', () => {
     // Do not let a camera frame already in progress overwrite live BLE telemetry.
     if (bleSensor && bleSensor.isConnected && !isSensorEvaluation) return;
 
-    const angleDeg = isSensorEvaluation
+    const measuredAngleDeg = isSensorEvaluation
       ? Number(data.sensorTelemetry.angleDeg)
       : Number(data.angulosAtuais.principalDeg);
-    const maxAngle = isSensorEvaluation ? 45 : 180;
+    const isCameraBiceps = !isSensorEvaluation && data.exerciseKey === "biceps_curl";
+    const angleDeg = isCameraBiceps
+      ? Math.max(0, Math.min(45, ((180 - measuredAngleDeg) / 135) * 45))
+      : measuredAngleDeg;
+    const maxAngle = isSensorEvaluation || isCameraBiceps ? 45 : 180;
     if (!Number.isFinite(angleDeg) || angleDeg < 0 || angleDeg > maxAngle) return;
-    if (isSensorEvaluation) data.angulosAtuais.principalDeg = angleDeg;
+    if (isSensorEvaluation || isCameraBiceps) data.angulosAtuais.principalDeg = angleDeg;
+    if (isCameraBiceps) data.targetRange = "0.0° a 45.0°";
 
     hudPhaseText.textContent = data.faseMovimento ? data.faseMovimento.toUpperCase() : "NEUTRO";
     if (hudAngleSub) {
@@ -971,9 +989,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const rangeMatch = String(data.targetRange || "").match(/([\d.]+)°\s*a\s*([\d.]+)°/);
     const bicepsFullyExtended = data.exerciseKey === "biceps_curl" &&
-      (isSensorEvaluation ? angleDeg <= 2.5 : angleDeg >= 165);
+      (isSensorEvaluation ? angleDeg <= 2.5 : measuredAngleDeg >= 165);
     const bicepsFlexedTarget = data.exerciseKey === "biceps_curl" &&
-      (isSensorEvaluation ? angleDeg >= 42.5 : Math.abs(angleDeg - 45) <= 5);
+      (isSensorEvaluation ? angleDeg >= 42.5 : Math.abs(measuredAngleDeg - 45) <= 5);
     const isWithinTarget = !bicepsFullyExtended && (isSensorEvaluation
       ? Boolean(rangeMatch && angleDeg >= Number(rangeMatch[1]) && angleDeg <= Number(rangeMatch[2]) &&
           (bicepsFlexedTarget || (!bicepsFullyExtended && latestCameraCorrection !== true)))
