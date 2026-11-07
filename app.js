@@ -88,7 +88,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let sensorAngleDisplayTarget = null;
   let sensorAngleDisplayFrame = null;
   let sensorAngleDisplayLastFrameAt = null;
-  let sensorAngleDisplayMaxAngle = 90;
+  let sensorAngleDisplayMaxAngle = 45;
   let sensorAngleDisplayUsesInteger = false;
 
   // Estado do Motor MediaPipe Pose & Conexão de Mídia
@@ -127,7 +127,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Limit the visual rate only; analysis and JSON continue to use the raw sensor value.
-  function updateAngleReadouts(angleDeg, isSensorEvaluation, useInteger = false, maxAngle = 90) {
+  function updateAngleReadouts(angleDeg, isSensorEvaluation, useInteger = false, maxAngle = 45) {
     if (!isSensorEvaluation) {
       if (sensorAngleDisplayFrame !== null) cancelAnimationFrame(sensorAngleDisplayFrame);
       sensorAngleDisplayFrame = null;
@@ -308,16 +308,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const sensorAngle = Number(latestSensorReading && latestSensorReading.angleDeg);
         const syncedAngle = Number.isFinite(sensorAngle) ? sensorAngle : processedData.angulosAtuais.principalDeg;
         const sensorTargetRange = processedData.exerciseKey === "biceps_curl"
-          ? "45.0° a 90.0°"
+          ? "22.5° a 45.0°"
           : processedData.targetRange;
         const angleRange = String(sensorTargetRange || "").match(/([\d.]+)°\s*a\s*([\d.]+)°/);
         const sensorOutsideRange = Number.isFinite(sensorAngle) && angleRange &&
           (sensorAngle < Number(angleRange[1]) || sensorAngle > Number(angleRange[2]));
         const cameraAngle = Number(processedData.angulosAtuais.principalDeg);
         const fullyExtended = processedData.exerciseKey === "biceps_curl" &&
-          (Number.isFinite(sensorAngle) ? sensorAngle <= 5 : cameraAngle >= 165);
+          (Number.isFinite(sensorAngle) ? sensorAngle <= 2.5 : cameraAngle >= 165);
         const nearFlexedTarget = processedData.exerciseKey === "biceps_curl" &&
-          (Number.isFinite(sensorAngle) ? sensorAngle >= 85 : Math.abs(cameraAngle - 45) <= 5);
+          (Number.isFinite(sensorAngle) ? sensorAngle >= 42.5 : Math.abs(cameraAngle - 45) <= 5);
         const needsCorrection = fullyExtended || (!nearFlexedTarget && Boolean(sensorOutsideRange || latestCameraCorrection));
         const overlayData = {
           ...processedData,
@@ -330,7 +330,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ...processedData.qualidadeExecucao,
             status: needsCorrection ? "ATENÇÃO" : "EXCELENTE",
             mensagemFeedback: nearFlexedTarget
-              ? "Flexão próxima de 90°. Boa contração do bíceps!"
+              ? "Flexão próxima de 45°. Boa contração do bíceps!"
               : fullyExtended
               ? "Flexione um pouco o cotovelo; a leitura do sensor está sincronizada com o braço direito."
               : latestCameraCorrection
@@ -952,7 +952,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const angleDeg = isSensorEvaluation
       ? Number(data.sensorTelemetry.angleDeg)
       : Number(data.angulosAtuais.principalDeg);
-    const maxAngle = isSensorEvaluation ? 90 : 180;
+    const maxAngle = isSensorEvaluation ? 45 : 180;
     if (!Number.isFinite(angleDeg) || angleDeg < 0 || angleDeg > maxAngle) return;
     if (isSensorEvaluation) data.angulosAtuais.principalDeg = angleDeg;
 
@@ -971,9 +971,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const rangeMatch = String(data.targetRange || "").match(/([\d.]+)°\s*a\s*([\d.]+)°/);
     const bicepsFullyExtended = data.exerciseKey === "biceps_curl" &&
-      (isSensorEvaluation ? angleDeg <= 5 : angleDeg >= 165);
+      (isSensorEvaluation ? angleDeg <= 2.5 : angleDeg >= 165);
     const bicepsFlexedTarget = data.exerciseKey === "biceps_curl" &&
-      (isSensorEvaluation ? angleDeg >= 85 : Math.abs(angleDeg - 45) <= 5);
+      (isSensorEvaluation ? angleDeg >= 42.5 : Math.abs(angleDeg - 45) <= 5);
     const isWithinTarget = !bicepsFullyExtended && (isSensorEvaluation
       ? Boolean(rangeMatch && angleDeg >= Number(rangeMatch[1]) && angleDeg <= Number(rangeMatch[2]) &&
           (bicepsFlexedTarget || (!bicepsFullyExtended && latestCameraCorrection !== true)))
@@ -984,7 +984,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const msg = isSensorEvaluation
       ? isWithinTarget
         ? bicepsFlexedTarget
-          ? "Flexão próxima de 90°. Boa contração do bíceps!"
+          ? "Flexão próxima de 45°. Boa contração do bíceps!"
           : `Ângulo do sensor dentro da faixa-alvo (${data.targetRange}).`
         : bicepsFullyExtended
           ? `Flexione um pouco o cotovelo. Leitura do sensor: ${angleDeg.toFixed(1)}°.`
@@ -1041,7 +1041,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const bleSensor = new window.LeanstarBLEManager(
     (reading) => {
       const sensorAngle = Number(reading && reading.angleDeg);
-      if (!Number.isFinite(sensorAngle) || sensorAngle < 0 || sensorAngle > 90) {
+      if (!Number.isFinite(sensorAngle) || sensorAngle < 0 || sensorAngle > 45) {
         console.warn("[BLE STREAM] Leitura ignorada; ângulo do sensor inválido:", reading);
         return;
       }
@@ -1053,7 +1053,7 @@ document.addEventListener('DOMContentLoaded', () => {
       latestSensorReading = { ...reading, angleDeg: sensorAngle };
       // Feed every BLE sample into the visual readout; the heavier dashboard
       // and JSON update remains coalesced below.
-      updateAngleReadouts(sensorAngle, true, Number.isInteger(reading.integerValue), 90);
+      updateAngleReadouts(sensorAngle, true, Number.isInteger(reading.integerValue), 45);
       const data = analyzer.processSensorAngle(sensorAngle);
       data.sensorTelemetry = { ...reading, angleDeg: sensorAngle };
       if (reading.targetJointName) data.sensorTelemetry.targetJointName = reading.targetJointName;

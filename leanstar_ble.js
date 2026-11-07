@@ -53,13 +53,13 @@ class LeanstarSignalFilter {
 }
 
 /**
- * Calibração da leitura analógica do sensor para um ângulo de 0° a 90°.
+ * Calibração da leitura analógica do sensor para um ângulo de 0° a 45°.
  */
 class LeanstarAngleConverter {
   constructor() {
     // Calibre estes valores conforme as leituras reais do sensor (ADC 0–1023).
     this.sensorStraight = 300; // Braço estendido = 0° (VALOR_RETO do firmware)
-    this.sensorBent = 850;     // Cotovelo flexionado = 90° (VALOR_DOBRADO do firmware)
+    this.sensorBent = 850;     // Cotovelo flexionado = 45° (VALOR_DOBRADO do firmware)
     // Um pouco mais responsivo, preservando suavização contra ruído do sensor.
     this.filter = new LeanstarSignalFilter(3, 0.65);
     this.lastFilteredValue = this.sensorStraight;
@@ -76,7 +76,7 @@ class LeanstarAngleConverter {
   }
 
   /**
-   * Calibra o valor analógico do cotovelo flexionado (90°).
+   * Calibra o valor analógico do cotovelo flexionado (45°).
    * @param {number} currentValue Leitura ADC com o cotovelo flexionado.
    */
   calibrateFlexion(currentValue = this.lastFilteredValue) {
@@ -90,7 +90,7 @@ class LeanstarAngleConverter {
   }
 
   /**
-   * Converte uma leitura analógica (0–1023) para um ângulo estimado (0–90°).
+   * Converte uma leitura analógica (0–1023) para um ângulo estimado (0–45°).
    */
   rawValueToAngle(rawValue) {
     const cleanValue = this.filter.process(rawValue);
@@ -98,7 +98,7 @@ class LeanstarAngleConverter {
     const difference = this.sensorBent - this.sensorStraight;
     if (Math.abs(difference) < 1) return NaN;
     const progress = (cleanValue - this.sensorStraight) / difference;
-    const angleDeg = Math.max(0, Math.min(90, progress * 90));
+    const angleDeg = Math.max(0, Math.min(45, progress * 45));
     return Number(angleDeg.toFixed(1));
   }
 }
@@ -381,7 +381,7 @@ class LeanstarBLEManager {
       }
       this.onDataCallback({
         timestamp: Date.now(),
-        angleDeg: Number(((rawPercent * 90) / 100).toFixed(1)),
+        angleDeg: Number(((rawPercent * 45) / 100).toFixed(1)),
         rawPercent,
         rawValue: text,
         targetJointName: "Ângulo do Cotovelo"
@@ -404,11 +404,11 @@ class LeanstarBLEManager {
     );
     const rawPercent = percentMatch ? Number(percentMatch[1]) : isPercent ? numericValue : null;
     const angleDeg = rawPercent !== null
-      ? (rawPercent * 90) / 100
+      ? (rawPercent * 45) / 100
       : numericValue;
 
-    if (!Number.isFinite(angleDeg) || angleDeg < 0 || angleDeg > 90 || (rawPercent !== null && (rawPercent < 0 || rawPercent > 100))) {
-      console.warn("[BLE STREAM] Leitura ignorada; esperava ângulo identificado (0–90°) ou percentual (0–100%):", text);
+    if (!Number.isFinite(angleDeg) || angleDeg < 0 || angleDeg > 45 || (rawPercent !== null && (rawPercent < 0 || rawPercent > 100))) {
+      console.warn("[BLE STREAM] Leitura ignorada; esperava ângulo identificado (0–45°) ou percentual (0–100%):", text);
       return;
     }
 
